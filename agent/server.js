@@ -1,0 +1,604 @@
+'use strict';
+// AIT Drive - storage agent (runs on the local PC)
+//
+// Layout on disk (STORAGE_ROOT):
+//   users/<id>/        each account's private drive (the owner uses users/_owner)
+//   users/<id>/.trash  soft-deleted items (counted against the quota)
+//   .ait/users.json    accounts (scrypt password hashes, quota, permissions)
+//   .ait/archive/      data of deleted accounts (never destroyed automatically)
+const express = require('express');
+const Busboy = require('busboy');
+const fs = require('fs');
+const fsp = fs.promises;
+const path = require('path');
+const crypto = require('crypto');
+const { promisify } = require('util');
+const { Transform, pipeline } = require('stream');
+const scrypt = promisify(crypto.scrypt);
+
+const PORT = parseInt(process.env.AGENT_PORT || '4001', 10);
+const HOST = process.env.AGENT_HOST || '127.0.0.1';
+const TOKEN = process.env.AGENT_TOKEN || '';
+const ROOT = path.resolve(process.env.STORAGE_ROOT || path.join(__dirname, '..', 'storage'));
+const ALLOW_OVERBOOK = (process.env.ALLOW_OVERBOOK || 'false') === 'true';
+
+const TRASH = '.trash';
+const USERS_DIR = path.join(ROOT, 'users');
+const META_DIR = path.join(ROOT, '.ait');
+const DB_FILE = path.join(META_DIR, 'users.json');
+const ARCHIVE_DIR = path.join(META_DIR, 'archive');
+const OWNER_ID = '_owner';
+const MIN_QUOTA = 1024 * 1024; // 1 MB
+const MAX_QUOTA = 1e15;
+const ALL_PERMS = Object.freeze({ upload: true, modify: true, delete: true, share: true });
+const DEFAULT_PERMS = Object.freeze({ upload: true, modify: true, delete: true, share: false });
+const PERM_LABEL = { upload: 'mengunggah', modify: 'mengubah (buat folder, ganti nama, pindah)', delete: 'menghapus', share: 'membagikan link' };
+const USER_RE = /^[a-z0-9][a-z0-9._-]{1,30}[a-z0-9]$/;
+const RESERVED_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/;
+
+if (TOKEN.length < 24) {
+  console.error('AGENT_TOKEN must be set and at least 24 characters long.');
+  process.exit(1);
+}
+
+// ---------- helpers ----------
+function httpError(status, msg) { const e = new Error(msg); e.status = status; return e; }
+const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+function fmtBytes(n) {
+  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i];
+}
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(a).digest();
+  const hb = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+function validName(name) {
+  if (typeof name !== 'string') return false;
+  const n = name.trim();
+  if (!n || n === '.' || n === '..') return false;
+  if (/[\\/:*?"<>|\x00-\x1f]/.test(n)) return false;
+  return n.length <= 200;
+}
+const userRoot = (id) => path.join(USERS_DIR, id);
+
+// ---------- v1 -> v2 migration (single shared drive -> owner's folder) ----------
+function migrateV1() {
+  if (fs.existsSync(META_DIR)) return;
+  const skip = new Set([TRASH, 'users', '.ait']);
+  const entries = fs.readdirSync(ROOT).filter((n) => !skip.has(n));
+  const hasTrash = fs.existsSync(path.join(ROOT, TRASH));
+  if (!entries.length && !hasTrash) return;
+  const dest = userRoot(OWNER_ID);
+  fs.mkdirSync(dest, { recursive: true });
+  for (const n of entries) fs.renameSync(path.join(ROOT, n), path.join(dest, n));
+  if (hasTrash) fs.renameSync(path.join(ROOT, TRASH), path.join(dest, TRASH));
+  console.log(`Migrated ${entries.length} item(s) from the v1 layout into users/${OWNER_ID}`);
+}
+fs.mkdirSync(ROOT, { recursive: true });
+migrateV1();
+fs.mkdirSync(USERS_DIR, { recursive: true });
+fs.mkdirSync(META_DIR, { recursive: true });
+
+// ---------- accounts database ----------
+let db = { version: 1, users: {} };
+try {
+  db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  if (!db.users || typeof db.users !== 'object') db.users = {};
+} catch (e) {
+  if (e.code !== 'ENOENT') { console.error('Cannot read ' + DB_FILE + ': ' + e.message); process.exit(1); }
+}
+let saveChain = Promise.resolve();
+function saveDb() {
+  saveChain = saveChain.then(async () => {
+    const tmp = DB_FILE + '.tmp';
+    await fsp.writeFile(tmp, JSON.stringify(db, null, 2));
+    await fsp.rename(tmp, DB_FILE);
+  });
+  return saveChain;
+}
+
+async function hashPw(pw) {
+  const salt = crypto.randomBytes(16);
+  const h = await scrypt(pw, salt, 64);
+  return `scrypt$${salt.toString('base64')}$${h.toString('base64')}`;
+}
+async function checkPw(pw, stored) {
+  const [, s, h] = String(stored || '').split('$');
+  if (!s || !h) return false;
+  const want = Buffer.from(h, 'base64');
+  const got = await scrypt(pw, Buffer.from(s, 'base64'), want.length);
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+}
+const dummyHash = hashPw('timing-equalizer'); // so unknown users cost the same as known ones
+
+// ---------- disk + usage accounting ----------
+async function disk() {
+  const s = await fsp.statfs(ROOT);
+  return { total: s.blocks * s.bsize, free: s.bavail * s.bsize };
+}
+async function dirSize(dir) {
+  let n = 0;
+  for (const e of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) n += await dirSize(p);
+    else if (e.isFile()) { try { n += (await fsp.stat(p)).size; } catch {} }
+  }
+  return n;
+}
+async function walkUsage(root) {
+  let used = 0, trash = 0;
+  for (const e of await fsp.readdir(root, { withFileTypes: true }).catch(() => [])) {
+    const p = path.join(root, e.name);
+    if (e.isDirectory()) { const s = await dirSize(p); used += s; if (e.name === TRASH) trash = s; }
+    else if (e.isFile()) { try { used += (await fsp.stat(p)).size; } catch {} }
+  }
+  return { used, trash };
+}
+// used = everything under the account's folder, INCLUDING .trash (so deleting does not free quota
+// until the trash is emptied). Counters are kept incrementally during uploads and re-synced from disk.
+const usage = new Map();
+async function getUsage(ctx) {
+  let u = usage.get(ctx.id);
+  if (!u) { u = { used: 0, trash: 0, at: 0, dirty: true, uploading: 0 }; usage.set(ctx.id, u); }
+  if (u.uploading === 0 && (u.dirty || Date.now() - u.at > 5 * 60 * 1000)) {
+    const r = await walkUsage(ctx.root);
+    u.used = r.used; u.trash = r.trash; u.at = Date.now(); u.dirty = false;
+  }
+  return u;
+}
+const touchUsage = (id) => { const u = usage.get(id); if (u) u.dirty = true; };
+
+// ---------- path helpers (all confined to the caller's own root) ----------
+function resolveSafe(root, rel) {
+  const clean = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const abs = path.resolve(root, clean);
+  if (abs !== root && !abs.startsWith(root + path.sep)) throw httpError(400, 'invalid path');
+  const first = path.relative(root, abs).split(path.sep)[0];
+  if (first === TRASH) throw httpError(400, 'invalid path');
+  return abs;
+}
+async function ensureInside(root, abs) {
+  let real;
+  try { real = await fsp.realpath(abs); } catch { return; }
+  const realRoot = await fsp.realpath(root);
+  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw httpError(400, 'invalid path');
+}
+const toRel = (root, abs) => path.relative(root, abs).split(path.sep).join('/');
+
+// ---------- app + auth ----------
+const app = express();
+app.disable('x-powered-by');
+app.use(express.json({ limit: '1mb' }));
+
+app.use((req, res, next) => {
+  if (req.path === '/health') return res.json({ ok: true });
+  const h = req.headers.authorization || '';
+  const t = h.startsWith('Bearer ') ? h.slice(7) : '';
+  if (!t || !safeEqual(t, TOKEN)) { res.setHeader('X-AIT-Reason', 'token'); return res.status(401).json({ error: 'unauthorized' }); }
+  next();
+});
+
+// credential check used by the gateway at login (no user context yet)
+app.post('/admin/verify', wrap(async (req, res) => {
+  const { username, password } = req.body || {};
+  const id = String(username || '').trim().toLowerCase();
+  const u = USER_RE.test(id) ? db.users[id] : null;
+  const ok = await checkPw(typeof password === 'string' ? password : '', u ? u.pw : await dummyHash);
+  if (!u || !ok) return res.status(401).json({ error: 'Username atau password salah.' });
+  if (!u.active) return res.status(403).json({ error: 'Akun dinonaktifkan. Hubungi admin.' });
+  u.lastLogin = Date.now();
+  saveDb().catch((e) => console.error('saveDb failed', e));
+  res.json({ id: u.id, tv: u.tv, role: u.role });
+}));
+
+// who is calling? The gateway authenticated the person; we resolve their rights here.
+const ensuredRoots = new Set();
+app.use((req, res, next) => {
+  const sessionBad = (status, msg) => { res.setHeader('X-AIT-Reason', 'session'); return res.status(status).json({ error: msg }); };
+  let ctx;
+  if (req.headers['x-ait-owner'] === '1') {
+    let name = 'owner';
+    try { name = decodeURIComponent(String(req.headers['x-ait-name'] || 'owner')).slice(0, 64); } catch {}
+    ctx = { id: OWNER_ID, name, role: 'owner', quota: null, perms: ALL_PERMS };
+  } else {
+    const id = String(req.headers['x-ait-user'] || '');
+    const u = USER_RE.test(id) ? db.users[id] : null;
+    if (!u) return sessionBad(401, 'Akun tidak ditemukan. Silakan masuk lagi.');
+    if (!u.active) return sessionBad(403, 'Akun dinonaktifkan. Hubungi admin.');
+    if (String(u.tv) !== String(req.headers['x-ait-tv'])) return sessionBad(401, 'Sesi tidak berlaku lagi. Silakan masuk lagi.');
+    ctx = { id, name: id, role: u.role, quota: u.quota == null ? null : u.quota, perms: u.role === 'admin' ? ALL_PERMS : u.perms };
+  }
+  ctx.root = userRoot(ctx.id);
+  if (!ensuredRoots.has(ctx.id)) { fs.mkdirSync(ctx.root, { recursive: true }); ensuredRoots.add(ctx.id); }
+  req.ctx = ctx;
+  next();
+});
+function need(ctx, perm) {
+  if (!ctx.perms[perm]) throw httpError(403, `Akun kamu tidak punya izin untuk ${PERM_LABEL[perm]}.`);
+}
+
+// ---------- me ----------
+app.get('/me', (req, res) => {
+  const c = req.ctx;
+  res.json({
+    id: c.id, name: c.name, role: c.role, quota: c.quota, perms: c.perms,
+    canAdmin: c.role === 'owner' || c.role === 'admin',
+    canChangePassword: c.role !== 'owner',
+  });
+});
+
+app.post('/me/password', wrap(async (req, res) => {
+  const c = req.ctx;
+  if (c.role === 'owner') throw httpError(400, 'Password owner diubah lewat ADMIN_PASSWORD di server.');
+  const { current, next } = req.body || {};
+  if (typeof next !== 'string' || next.length < 8 || next.length > 200) throw httpError(400, 'Password baru minimal 8 karakter.');
+  const u = db.users[c.id];
+  if (!(await checkPw(typeof current === 'string' ? current : '', u.pw))) throw httpError(400, 'Password saat ini salah.');
+  const pw = await hashPw(next);
+  u.pw = pw; u.tv = (u.tv || 1) + 1; u.updatedAt = Date.now();
+  await saveDb();
+  res.json({ ok: true, relogin: true });
+}));
+
+// ---------- files ----------
+app.get('/list', wrap(async (req, res) => {
+  const root = req.ctx.root;
+  const abs = resolveSafe(root, req.query.path);
+  await ensureInside(root, abs);
+  const st = await fsp.stat(abs).catch(() => null);
+  if (!st || !st.isDirectory()) throw httpError(404, 'folder not found');
+  const items = [];
+  for (const name of await fsp.readdir(abs)) {
+    if (abs === root && name === TRASH) continue;
+    try {
+      const s = await fsp.stat(path.join(abs, name));
+      items.push({ name, type: s.isDirectory() ? 'dir' : 'file', size: s.isDirectory() ? 0 : s.size, mtime: s.mtimeMs });
+    } catch { /* skip unreadable */ }
+  }
+  items.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.type === 'dir' ? -1 : 1));
+  res.json({ path: toRel(root, abs), items });
+}));
+
+app.get('/stats', wrap(async (req, res) => {
+  const c = req.ctx;
+  const u = await getUsage(c);
+  const d = await disk();
+  let total, free;
+  if (c.quota != null) { total = c.quota; free = Math.max(0, Math.min(c.quota - u.used, d.free)); }
+  else { free = d.free; total = u.used + d.free; }
+  res.json({ total, free, used: u.used, trash: u.trash, quota: c.quota, diskFree: d.free });
+}));
+
+app.get('/search', wrap(async (req, res) => {
+  const root = req.ctx.root;
+  const q = String(req.query.q || '').toLowerCase().trim();
+  if (!q) return res.json({ items: [] });
+  const out = [];
+  async function walk(dir) {
+    if (out.length >= 200) return;
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (dir === root && e.name === TRASH) continue;
+      const p = path.join(dir, e.name);
+      if (e.name.toLowerCase().includes(q)) {
+        try {
+          const s = await fsp.stat(p);
+          out.push({ name: e.name, path: toRel(root, p), type: e.isDirectory() ? 'dir' : 'file', size: e.isDirectory() ? 0 : s.size, mtime: s.mtimeMs });
+        } catch {}
+      }
+      if (e.isDirectory()) await walk(p);
+      if (out.length >= 200) return;
+    }
+  }
+  await walk(root);
+  res.json({ items: out });
+}));
+
+app.get('/download', wrap(async (req, res) => {
+  const root = req.ctx.root;
+  const abs = resolveSafe(root, req.query.path);
+  await ensureInside(root, abs);
+  const st = await fsp.stat(abs).catch(() => null);
+  if (!st || !st.isFile()) throw httpError(404, 'file not found');
+  const inline = req.query.inline === '1';
+  res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(path.basename(abs))}`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.sendFile(abs, { dotfiles: 'allow', acceptRanges: true }, (err) => {
+    if (err && !res.headersSent) res.status(err.status || 500).json({ error: 'send failed' });
+  });
+}));
+
+app.post('/upload', (req, res, next) => {
+  (async () => {
+    const ctx = req.ctx;
+    need(ctx, 'upload');
+    const dir = resolveSafe(ctx.root, req.query.path);
+    await ensureInside(ctx.root, dir);
+    const st = await fsp.stat(dir).catch(() => null);
+    if (!st || !st.isDirectory()) throw httpError(404, 'folder not found');
+
+    const u = await getUsage(ctx);
+    const cl = parseInt(req.headers['content-length'] || '0', 10) || 0;
+    if (ctx.quota != null && u.used + cl > ctx.quota) {
+      throw httpError(413, `Kuota tidak cukup. Sisa ${fmtBytes(Math.max(0, ctx.quota - u.used))} dari ${fmtBytes(ctx.quota)}.`);
+    }
+    if (cl > (await disk()).free) throw httpError(413, 'Ruang disk PC tidak cukup.');
+
+    u.uploading++;
+    let ended = false;
+    const end = () => { if (!ended) { ended = true; u.uploading--; } };
+    const bb = Busboy({ headers: req.headers, limits: { fileSize: 50 * 1024 * 1024 * 1024 } });
+    const saved = [];
+    const pending = [];
+    let failed = null;
+    let responded = false;
+
+    const finish = async () => {
+      if (responded) return;
+      responded = true;
+      await Promise.all(pending);
+      end();
+      if (failed) return next(failed);
+      res.json({ saved });
+    };
+
+    bb.on('file', (field, stream, info) => {
+      const name = path.basename(String(info.filename || '').replace(/\\/g, '/'));
+      if (!validName(name)) { stream.resume(); failed = failed || httpError(400, 'invalid file name'); return; }
+      let target = path.join(dir, name);
+      const ext = path.extname(name), base = path.basename(name, ext);
+      let i = 1;
+      while (fs.existsSync(target) || fs.existsSync(target + '.part')) target = path.join(dir, `${base} (${i++})${ext}`);
+      const tmp = target + '.part';
+      const ws = fs.createWriteStream(tmp);
+      let written = 0, over = false, limited = false;
+      stream.on('limit', () => { limited = true; });
+      const counter = new Transform({
+        transform(chunk, enc, cb) {
+          if (over) return cb(); // keep draining, drop data
+          if (ctx.quota != null && u.used + chunk.length > ctx.quota) { over = true; return cb(); }
+          written += chunk.length; u.used += chunk.length;
+          cb(null, chunk);
+        },
+      });
+      pending.push(new Promise((resolve) => {
+        pipeline(stream, counter, ws, async (err) => {
+          const bad = err || over || limited;
+          if (bad) {
+            failed = failed || (over ? httpError(413, `Kuota terlampaui (${fmtBytes(ctx.quota)}).`) : limited ? httpError(413, 'file too large') : err);
+            u.used -= written;
+            await fsp.rm(tmp, { force: true }).catch(() => {});
+            return resolve();
+          }
+          try { await fsp.rename(tmp, target); saved.push(path.basename(target)); }
+          catch (e) { failed = failed || e; u.used -= written; await fsp.rm(tmp, { force: true }).catch(() => {}); }
+          resolve();
+        });
+      }));
+    });
+    bb.on('error', (e) => { failed = failed || e; finish().catch(() => {}); });
+    bb.on('close', () => { finish().catch(() => {}); });
+    req.on('aborted', () => { failed = failed || httpError(499, 'aborted'); finish().catch(() => {}); });
+    req.pipe(bb);
+  })().catch(next);
+});
+
+app.post('/mkdir', wrap(async (req, res) => {
+  const ctx = req.ctx;
+  need(ctx, 'modify');
+  const { path: parent = '', name } = req.body || {};
+  if (!validName(name)) throw httpError(400, 'invalid name');
+  const dir = resolveSafe(ctx.root, parent);
+  await ensureInside(ctx.root, dir);
+  const target = path.join(dir, name.trim());
+  if (fs.existsSync(target)) throw httpError(409, 'already exists');
+  await fsp.mkdir(target);
+  res.json({ ok: true });
+}));
+
+app.post('/rename', wrap(async (req, res) => {
+  const ctx = req.ctx;
+  need(ctx, 'modify');
+  const { path: p, newName } = req.body || {};
+  if (!validName(newName)) throw httpError(400, 'invalid name');
+  const abs = resolveSafe(ctx.root, p);
+  if (abs === ctx.root) throw httpError(400, 'invalid path');
+  await ensureInside(ctx.root, abs);
+  const target = path.join(path.dirname(abs), newName.trim());
+  if (fs.existsSync(target)) throw httpError(409, 'already exists');
+  await fsp.rename(abs, target);
+  res.json({ ok: true });
+}));
+
+app.post('/move', wrap(async (req, res) => {
+  const ctx = req.ctx;
+  need(ctx, 'modify');
+  const { path: p, dest } = req.body || {};
+  const abs = resolveSafe(ctx.root, p);
+  const dir = resolveSafe(ctx.root, dest);
+  if (abs === ctx.root) throw httpError(400, 'invalid path');
+  await ensureInside(ctx.root, abs); await ensureInside(ctx.root, dir);
+  const st = await fsp.stat(dir).catch(() => null);
+  if (!st || !st.isDirectory()) throw httpError(404, 'destination not found');
+  if (dir === abs || dir.startsWith(abs + path.sep)) throw httpError(400, 'cannot move into itself');
+  const target = path.join(dir, path.basename(abs));
+  if (fs.existsSync(target)) throw httpError(409, 'already exists in destination');
+  await fsp.rename(abs, target);
+  res.json({ ok: true });
+}));
+
+app.post('/delete', wrap(async (req, res) => {
+  const ctx = req.ctx;
+  need(ctx, 'delete');
+  const abs = resolveSafe(ctx.root, (req.body || {}).path);
+  if (abs === ctx.root) throw httpError(400, 'invalid path');
+  await ensureInside(ctx.root, abs);
+  if (!fs.existsSync(abs)) throw httpError(404, 'not found');
+  const trashDir = path.join(ctx.root, TRASH);
+  await fsp.mkdir(trashDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  await fsp.rename(abs, path.join(trashDir, `${stamp}__${path.basename(abs)}`));
+  touchUsage(ctx.id); // total stays the same, only the trash figure changes
+  res.json({ ok: true });
+}));
+
+app.post('/trash/empty', wrap(async (req, res) => {
+  const ctx = req.ctx;
+  need(ctx, 'delete');
+  const u = await getUsage(ctx);
+  await fsp.rm(path.join(ctx.root, TRASH), { recursive: true, force: true });
+  u.used = Math.max(0, u.used - u.trash); u.trash = 0; u.dirty = true;
+  res.json({ ok: true });
+}));
+
+// ---------- admin ----------
+const admin = express.Router();
+admin.use((req, res, next) => {
+  if (req.ctx.role !== 'owner' && req.ctx.role !== 'admin') return next(httpError(403, 'Hanya admin yang boleh membuka ini.'));
+  next();
+});
+
+function normPerms(input, base) {
+  const out = { ...(base || DEFAULT_PERMS) };
+  if (input && typeof input === 'object') for (const k of Object.keys(ALL_PERMS)) if (k in input) out[k] = !!input[k];
+  return out;
+}
+function parseQuota(v, role) {
+  if (v === null || v === undefined || v === '') {
+    if (role === 'admin') return null;
+    throw httpError(400, 'Kuota wajib diisi untuk pengguna biasa.');
+  }
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n) || n < MIN_QUOTA) throw httpError(400, 'Kuota minimal 1 MB.');
+  if (n > MAX_QUOTA) throw httpError(400, 'Kuota terlalu besar.');
+  return n;
+}
+async function overview(excludeId) {
+  const d = await disk();
+  let usedUsers = 0, allocated = 0, allocatedOthers = 0;
+  for (const u of Object.values(db.users)) {
+    const us = await getUsage({ id: u.id, root: userRoot(u.id) });
+    usedUsers += us.used;
+    if (u.quota != null) { allocated += u.quota; if (u.id !== excludeId) allocatedOthers += u.quota; }
+  }
+  const owner = await getUsage({ id: OWNER_ID, root: userRoot(OWNER_ID) });
+  const capacity = d.free + usedUsers;
+  return {
+    diskTotal: d.total, diskFree: d.free, ownerUsed: owner.used, usedUsers,
+    allocated, allocatedOthers, capacity, unallocated: Math.max(0, capacity - allocated),
+    allowOverbook: ALLOW_OVERBOOK, userCount: Object.keys(db.users).length,
+  };
+}
+async function checkAllocation(excludeId, quota) {
+  if (ALLOW_OVERBOOK || quota == null) return;
+  const o = await overview(excludeId);
+  if (o.allocatedOthers + quota > o.capacity) {
+    throw httpError(400, `Alokasi melebihi kapasitas disk. Sisa yang bisa dialokasikan: ${fmtBytes(Math.max(0, o.capacity - o.allocatedOthers))}.`);
+  }
+}
+async function publicUser(u) {
+  const us = await getUsage({ id: u.id, root: userRoot(u.id) });
+  return {
+    id: u.id, role: u.role, active: !!u.active, quota: u.quota == null ? null : u.quota,
+    perms: u.role === 'admin' ? { ...ALL_PERMS } : { ...u.perms },
+    used: us.used, trash: us.trash, createdAt: u.createdAt, lastLogin: u.lastLogin || null,
+  };
+}
+function mustManage(ctx, target, newRole) {
+  if ((target && target.role === 'admin') || newRole === 'admin') {
+    if (ctx.role !== 'owner') throw httpError(403, 'Hanya owner yang boleh mengelola akun admin.');
+  }
+}
+const checkPassword = (p) => {
+  if (typeof p !== 'string' || p.length < 8) throw httpError(400, 'Password minimal 8 karakter.');
+  if (p.length > 200) throw httpError(400, 'Password terlalu panjang.');
+};
+
+admin.get('/overview', wrap(async (req, res) => res.json(await overview())));
+
+admin.get('/users', wrap(async (req, res) => {
+  const list = [];
+  for (const u of Object.values(db.users)) list.push(await publicUser(u));
+  list.sort((a, b) => a.id.localeCompare(b.id));
+  res.json({ users: list });
+}));
+
+admin.post('/users', wrap(async (req, res) => {
+  const b = req.body || {};
+  const id = String(b.username || '').trim().toLowerCase();
+  if (!USER_RE.test(id) || RESERVED_RE.test(id.split('.')[0])) {
+    throw httpError(400, 'Username 3-32 karakter: huruf kecil, angka, titik, minus, garis bawah (harus diawali dan diakhiri huruf/angka).');
+  }
+  const role = b.role === 'admin' ? 'admin' : 'user';
+  mustManage(req.ctx, null, role);
+  checkPassword(b.password);
+  const quota = parseQuota(b.quota, role);
+  const perms = normPerms(b.perms);
+  const pw = await hashPw(b.password);
+  if (db.users[id] || fs.existsSync(userRoot(id))) throw httpError(409, 'Username sudah dipakai.');
+  await checkAllocation(null, quota);
+  const now = Date.now();
+  db.users[id] = { id, role, active: b.active === false ? false : true, quota, perms, pw, tv: 1, createdAt: now, updatedAt: now };
+  await saveDb();
+  fs.mkdirSync(userRoot(id), { recursive: true });
+  ensuredRoots.add(id);
+  res.status(201).json(await publicUser(db.users[id]));
+}));
+
+admin.patch('/users/:id', wrap(async (req, res) => {
+  const id = String(req.params.id || '');
+  const u = USER_RE.test(id) ? db.users[id] : null;
+  if (!u) throw httpError(404, 'Pengguna tidak ditemukan.');
+  const b = req.body || {};
+  const newRole = 'role' in b ? (b.role === 'admin' ? 'admin' : 'user') : u.role;
+  mustManage(req.ctx, u, newRole);
+
+  let quota = u.quota == null ? null : u.quota;
+  if ('quota' in b || newRole !== u.role) quota = parseQuota('quota' in b ? b.quota : quota, newRole);
+  const perms = normPerms(b.perms, u.perms);
+  let pw = null;
+  if (b.password !== undefined && b.password !== '') { checkPassword(b.password); pw = await hashPw(b.password); }
+  const active = 'active' in b ? !!b.active : u.active;
+  if (quota !== (u.quota == null ? null : u.quota)) await checkAllocation(id, quota);
+
+  u.role = newRole; u.quota = quota; u.perms = perms; u.updatedAt = Date.now();
+  if (pw) { u.pw = pw; u.tv = (u.tv || 1) + 1; }
+  if (active !== u.active) { u.active = active; u.tv = (u.tv || 1) + 1; } // any status change ends old sessions
+  await saveDb();
+  res.json(await publicUser(u));
+}));
+
+admin.delete('/users/:id', wrap(async (req, res) => {
+  const id = String(req.params.id || '');
+  const u = USER_RE.test(id) ? db.users[id] : null;
+  if (!u) throw httpError(404, 'Pengguna tidak ditemukan.');
+  mustManage(req.ctx, u, null);
+  let archived = null;
+  if (fs.existsSync(userRoot(id))) {
+    await fsp.mkdir(ARCHIVE_DIR, { recursive: true });
+    archived = `${id}__${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    await fsp.rename(userRoot(id), path.join(ARCHIVE_DIR, archived));
+  }
+  delete db.users[id];
+  usage.delete(id); ensuredRoots.delete(id);
+  await saveDb();
+  res.json({ ok: true, archived });
+}));
+
+app.use('/admin', admin);
+
+// ---------- errors ----------
+app.use((err, req, res, next) => {
+  if (res.headersSent) return;
+  const status = err.status || (err.code === 'ENOENT' ? 404 : 500);
+  if (status === 500) console.error(err);
+  res.status(status).json({ error: status === 500 ? 'internal error' : err.message });
+});
+
+app.listen(PORT, HOST, () => {
+  console.log(`Agent listening on http://${HOST}:${PORT}  root=${ROOT}  users=${Object.keys(db.users).length}${ALLOW_OVERBOOK ? '  overbook=on' : ''}`);
+});

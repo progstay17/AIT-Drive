@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="author" content="Fadhil Ghifarion 法迪 for AIT">
+  <title>AIT Drive</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<main class="login-page" id="login-view" hidden>
+  <form class="login-card" id="login-form" novalidate>
+    <div class="brand">
+      <span class="brand-mark"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M9 13h6M9 17h4"/></svg></span>
+      <span>AIT Drive</span>
+    </div>
+    <div class="eyebrow">Cloud pribadi kamu</div>
+    <h1>Selamat datang kembali.</h1>
+    <p class="muted">Masuk untuk membuka file pribadi kamu.</p>
+    <label class="form-field">Username
+      <input class="input" id="login-user" name="username" autocomplete="username" required>
+    </label>
+    <label class="form-field">Password
+      <input class="input" id="login-pass" name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <p class="form-error" id="login-error" role="alert" hidden></p>
+    <button class="btn btn-primary" id="login-submit" type="submit"><span class="spinner" id="login-spinner" hidden></span><span id="login-label">Masuk</span></button>
+    <p class="login-foot">Penyimpanan privat. File kamu, kendali kamu.</p>
+    <p class="credit">Dibuat oleh Fadhil Ghifarion <span lang="zh">法迪</span> for AIT</p>
+  </form>
+</main>
+
+<!-- APP -->
+<div class="app-shell" id="app-view" hidden>
+  <aside class="sidebar" id="sidebar" aria-label="Navigasi">
+    <div class="brand">
+      <span class="brand-mark"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M9 13h6M9 17h4"/></svg></span>
+      <span>AIT Drive</span>
+    </div>
+
+    <button class="btn btn-primary" id="upload-btn" type="button">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      Unggah
+    </button>
+    <input type="file" id="file-input" multiple hidden>
+
+    <nav class="sidebar-nav" aria-label="Drive">
+      <div class="eyebrow nav-label">Drive Saya</div>
+      <a class="sidebar-item is-active" id="nav-drive" href="#/" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></svg>
+        Drive Saya
+      </a>
+      <a class="sidebar-item" id="nav-admin" href="#admin" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z"/><path d="m9.5 12 2 2 3.5-4"/></svg>
+        Panel Admin
+      </a>
+    </nav>
+
+    <div class="account" id="account" hidden>
+      <div class="account-id">
+        <span class="avatar" id="account-avatar" aria-hidden="true"></span>
+        <div class="account-text">
+          <div class="account-name" id="account-name"></div>
+          <div class="eyebrow" id="account-role"></div>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="pw-btn" type="button" hidden>Ganti password</button>
+    </div>
+
+    <div class="storage">
+      <div class="storage-head"><span>Penyimpanan</span><span id="storage-text">—</span></div>
+      <div class="progress-track" style="margin-top:10px"><div class="progress-value" id="storage-fill"></div></div>
+      <div class="storage-caption" id="storage-caption">&nbsp;</div>
+      <button class="btn btn-secondary btn-sm" id="trash-btn" type="button" hidden>Kosongkan sampah</button>
+      <div class="status-line"><span class="status-dot" id="agent-dot"></span><span id="agent-text">PC: memeriksa…</span></div>
+    </div>
+    <p class="credit sidebar-credit">AIT Drive &middot; Fadhil Ghifarion <span lang="zh">法迪</span> for AIT</p>
+  </aside>
+  <div class="sidebar-scrim" id="scrim" hidden></div>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="btn btn-ghost btn-icon mobile-only" id="menu-btn" type="button" aria-label="Buka menu" aria-expanded="false" aria-controls="sidebar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/></svg>
+        <input class="search-input" id="search" type="search" placeholder="Cari file dan folder…" aria-label="Cari file dan folder" autocomplete="off">
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost btn-icon mobile-only" id="upload-btn-top" type="button" aria-label="Unggah file">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5M7.5 9.5 12 5l4.5 4.5M5 19h14"/></svg>
+        </button>
+        <button class="btn btn-secondary hide-mobile" id="mkdir-btn" type="button">Folder baru</button>
+        <button class="btn btn-ghost btn-icon mobile-only" id="mkdir-btn-top" type="button" aria-label="Folder baru">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
+        </button>
+        <button class="btn btn-ghost btn-icon" id="view-btn" type="button" aria-label="Ganti tampilan grid/daftar" title="Grid / Daftar">
+          <svg id="view-icon-list" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" hidden><path d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01"/></svg>
+          <svg id="view-icon-grid" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg>
+        </button>
+        <button class="btn btn-ghost btn-icon" id="theme-btn" type="button" aria-label="Ganti tema terang/gelap" title="Tema">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 4v16" /><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button class="btn btn-ghost btn-sm" id="logout-btn" type="button">Keluar</button>
+      </div>
+    </header>
+
+    <div class="page" id="page">
+      <div class="page-heading">
+        <div>
+          <nav class="breadcrumb" id="crumbs" aria-label="Lokasi"></nav>
+          <h1 class="page-title" id="page-title">Drive Saya</h1>
+        </div>
+        <div class="eyebrow" id="count"></div>
+      </div>
+      <div id="content" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+
+<div class="dropzone dropzone-overlay is-dragover" id="dropzone" hidden>
+  <div>
+    <div class="dropzone-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5M7.5 9.5 12 5l4.5 4.5M5 19h14"/></svg></div>
+    <strong>Lepaskan untuk mengunggah</strong>
+    <span class="muted">File akan masuk ke folder yang sedang dibuka</span>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div class="toast-stack" id="toasts" aria-live="polite"></div>
+
+<script src="/admin.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

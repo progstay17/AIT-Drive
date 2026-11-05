@@ -1,0 +1,17 @@
+{
+  "name": "ait-drive-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AIT Drive web gateway + UI (deploy on Coolify/Docker); storage lives on the PC agent",
+  "author": "Fadhil Ghifarion 法迪 for AIT",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

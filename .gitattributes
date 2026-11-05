@@ -1,0 +1,6 @@
+# Normalize line endings so the Docker build and scripts behave the same on every OS
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary

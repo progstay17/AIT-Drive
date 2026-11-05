@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# the drive contents never go to git
+storage/
+
+# secrets
+agent/agent.env
+web/coolify-secrets.txt
+.env
+*.env
+!*.env.example
+
+# misc
+npm-debug.log*
+.DS_Store
+Thumbs.db
