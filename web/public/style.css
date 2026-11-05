@@ -30,7 +30,7 @@
   --info-soft: #E2F1F5;
   --shadow-sm: 0 1px 2px rgba(19, 47, 77, .055), 0 1px 1px rgba(19, 47, 77, .035);
   --shadow-md: 0 8px 24px rgba(19, 47, 77, .11), 0 2px 6px rgba(19, 47, 77, .055);
-  --shadow-lg: 0 20px 60px rgba(19, 47, 77, .19), 0 4px 14px rgba(25, 38, 27, .08);
+  --shadow-lg: 0 20px 60px rgba(19, 47, 77, .19), 0 4px 14px rgba(19, 47, 77, .08);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -43,11 +43,11 @@
   --space-12: 48px;
   --space-16: 64px;
 
-  --r-xs: 6px;
-  --r-sm: 9px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 22px;
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 9px;
+  --r-xl: 12px;
   --r-pill: 999px;
 
   --t-fast: 120ms;
@@ -127,7 +127,7 @@ a { color: inherit; text-decoration: none; }
   background: var(--surface); border-right: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 17px; font-weight: 700; letter-spacing: -.04em; }
-.brand-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px 8px 8px 3px; color: #F8FAFC; background: #102F55; }
+.brand-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 5px 5px 5px 2px; color: #F8FAFC; background: #102F55; }
 .sidebar-nav { display: grid; gap: 4px; }
 .sidebar-item {
   min-height: 42px; display: flex; align-items: center; gap: 12px;
