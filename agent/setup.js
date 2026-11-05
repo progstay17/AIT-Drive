@@ -68,7 +68,7 @@ const ask = (q) => new Promise((resolve) => {
   console.log('\n=== Setup AIT Drive Agent ===\n');
 
   // 1) storage folder
-  const defFolder = cur.STORAGE_ROOT || path.resolve(__dirname, '..', 'storage');
+  const defFolder = cur.STORAGE_ROOT || path.join(process.env.ProgramData || 'C:\ProgramData', 'AIT-Drive', 'storage');
   console.log('Folder storage menentukan di mana SEMUA file pengguna disimpan di PC ini.');
   console.log(`Sekarang: ${defFolder}\n`);
   let folder = null;
@@ -116,6 +116,14 @@ const ask = (q) => new Promise((resolve) => {
     `AGENT_PORT=${port}`,
     '# Rahasia bersama dengan web di Coolify (harus sama persis dengan AGENT_TOKEN di sana)',
     `AGENT_TOKEN=${token}`,
+    '# Tunnel: none | cloudflare | chisel',
+    `TUNNEL_PROVIDER=${cur.TUNNEL_PROVIDER || 'none'}`,
+    `CLOUDFLARED_PATH=${cur.CLOUDFLARED_PATH || ''}`,
+    `CLOUDFLARED_TUNNEL_TOKEN=${cur.CLOUDFLARED_TUNNEL_TOKEN || ''}`,
+    `CHISEL_PATH=${cur.CHISEL_PATH || ''}`,
+    `CHISEL_SERVER=${cur.CHISEL_SERVER || ''}`,
+    `CHISEL_AUTH=${cur.CHISEL_AUTH || ''}`,
+    `CHISEL_REMOTE_PORT=${cur.CHISEL_REMOTE_PORT || '14001'}`,
     '',
   ].join('\r\n');
   fs.writeFileSync(ENV_FILE, body);

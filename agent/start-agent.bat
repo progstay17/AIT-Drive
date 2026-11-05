@@ -1,5 +1,5 @@
 @echo off
-rem Cloud Drive agent launcher. Copy agent.env.example to agent.env and fill in values first.
+rem AIT Drive Agent launcher. Keep agent.env private and never commit it.
 cd /d %~dp0
 if not exist agent.env (
   echo agent.env not found. Copy agent.env.example to agent.env and edit it.
