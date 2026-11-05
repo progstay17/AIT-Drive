@@ -81,6 +81,8 @@
     cloudOff: '<path d="M7 18a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 9.5a3.8 3.8 0 0 1 .5 7.5"/><path d="m4 4 16 16"/>',
     check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
     alert: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5M12 16h.01"/>',
+    info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
+    warning: '<path d="M10.3 4.8 2.9 17.5A1.7 1.7 0 0 0 4.4 20h15.2a1.7 1.7 0 0 0 1.5-2.5L13.7 4.8a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 16h.01"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
   };
   function svg(inner, cls, size) {
@@ -101,10 +103,13 @@
 
   // ---------------------------------------------------------------- toasts
   function toast(o) {
-    const t = el('div', 'toast toast-' + (o.kind || 'success'));
-    t.setAttribute('role', o.kind === 'error' ? 'alert' : 'status');
+    const kind = ['success', 'error', 'info', 'warning'].includes(o.kind) ? o.kind : 'success';
+    const icon = (k) => k === 'error' ? UI.alert : k === 'warning' ? UI.warning : k === 'info' ? UI.info : UI.check;
+    const t = el('div', 'toast toast-' + kind);
+    t.setAttribute('role', kind === 'error' || kind === 'warning' ? 'alert' : 'status');
+    t.setAttribute('aria-atomic', 'true');
     const mark = el('span', 'toast-mark');
-    mark.appendChild(svg(o.kind === 'error' ? UI.alert : UI.check, null, 18));
+    mark.appendChild(svg(icon(kind), null, 18));
     const body = el('div', 'toast-body');
     const title = el('div', 'toast-title', o.title || '');
     const msg = el('div', 'toast-message', o.message || '');
@@ -120,25 +125,44 @@
     body.appendChild(actions);
     const close = el('button', 'btn btn-ghost btn-icon btn-sm toast-close');
     close.type = 'button';
-    close.setAttribute('aria-label', 'Tutup');
+    close.setAttribute('aria-label', 'Tutup notifikasi');
     close.appendChild(svg(UI.close, null, 14));
     t.append(mark, body, close);
     $('toasts').appendChild(t);
 
-    let timer = null;
+    let timer = null, remaining = o.timeout || 0, startedAt = 0, removed = false;
+    const stopTimer = () => {
+      if (!timer) return;
+      clearTimeout(timer); timer = null;
+      remaining = Math.max(0, remaining - (Date.now() - startedAt));
+    };
+    const startTimer = () => {
+      if (!remaining || timer || removed || document.hidden) return;
+      startedAt = Date.now();
+      timer = setTimeout(() => ctl.close(), remaining);
+    };
     const ctl = {
       el: t,
-      close() { clearTimeout(timer); t.remove(); },
-      setProgress(p) { if (fill) fill.style.setProperty('--progress', p + '%'); },
+      close() {
+        if (removed) return;
+        removed = true; stopTimer();
+        t.classList.add('is-leaving');
+        const finish = () => t.remove();
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) finish();
+        else t.addEventListener('transitionend', finish, { once: true });
+        setTimeout(finish, 220);
+      },
+      setProgress(p) { if (fill) fill.style.setProperty('--progress', Math.max(0, Math.min(100, p)) + '%'); },
       update(patch) {
         if (patch.kind) {
-          t.className = 'toast toast-' + patch.kind;
-          t.setAttribute('role', patch.kind === 'error' ? 'alert' : 'status');
-          mark.replaceChildren(svg(patch.kind === 'error' ? UI.alert : UI.check, null, 18));
+          const next = ['success', 'error', 'info', 'warning'].includes(patch.kind) ? patch.kind : 'success';
+          t.className = 'toast toast-' + next;
+          t.setAttribute('role', next === 'error' || next === 'warning' ? 'alert' : 'status');
+          mark.replaceChildren(svg(icon(next), null, 18));
         }
         if (patch.title != null) title.textContent = patch.title;
         if (patch.message != null) msg.textContent = patch.message;
-        if (patch.hideProgress && fill) fill.parentNode.remove();
+        if (patch.hideProgress && fill) { fill.parentNode.remove(); fill = null; }
       },
       addAction(label, fn) {
         const b = el('button', 'btn btn-secondary btn-sm', label);
@@ -146,14 +170,21 @@
         b.onclick = () => { fn(); };
         actions.appendChild(b);
       },
-      autoClose(ms) { clearTimeout(timer); timer = setTimeout(() => ctl.close(), ms); },
+      autoClose(ms) { stopTimer(); remaining = Math.max(0, ms); startTimer(); },
     };
+    t.addEventListener('pointerenter', stopTimer);
+    t.addEventListener('pointerleave', startTimer);
+    t.addEventListener('focusin', stopTimer);
+    t.addEventListener('focusout', (e) => { if (!t.contains(e.relatedTarget)) startTimer(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stopTimer(); else startTimer(); }, { once: true });
     close.onclick = ctl.close;
-    if (o.timeout) ctl.autoClose(o.timeout);
+    startTimer();
     return ctl;
   }
-  const ok = (title, message) => toast({ kind: 'success', title, message, timeout: 3000 });
-  const fail = (title, message) => toast({ kind: 'error', title, message, timeout: 6000 });
+  const ok = (title, message) => toast({ kind: 'success', title, message, timeout: 3600 });
+  const fail = (title, message) => toast({ kind: 'error', title, message, timeout: 7000 });
+  const info = (title, message) => toast({ kind: 'info', title, message, timeout: 5000 });
+  const warn = (title, message) => toast({ kind: 'warning', title, message, timeout: 6500 });
 
   // ---------------------------------------------------------------- api
   async function api(path, opts = {}) {
@@ -752,11 +783,18 @@
       tb.textContent = `Kosongkan sampah (${fmtSize(s.trash || 0)})`;
     } catch {}
   }
+  let previousAgentState = null;
   async function pollStatus() {
     try {
       const s = await api('/api/status');
-      $('agent-dot').className = 'status-dot ' + (s.agent ? 'on' : 'off');
-      $('agent-text').textContent = s.agent ? 'PC online' : 'PC offline';
+      const online = !!s.agent;
+      $('agent-dot').className = 'status-dot ' + (online ? 'on' : 'off');
+      $('agent-text').textContent = online ? 'PC online' : 'PC offline';
+      if (previousAgentState !== null && previousAgentState !== online) {
+        if (online) info('Koneksi pulih', 'PC storage kembali online. File bisa diakses lagi.');
+        else warn('PC storage offline', 'Koneksi ke PC terputus. Operasi file mungkin belum tersedia.');
+      }
+      previousAgentState = online;
     } catch {}
   }
 
@@ -797,7 +835,7 @@
     if (sub) $('crumbs').appendChild(el('span', null, sub));
   }
   const admin = window.AITAdmin.create({
-    el, svg, UI, fmtSize, fmtDate, api, send, ok, fail, openModal, dialog, setHeading,
+    el, svg, UI, fmtSize, fmtDate, api, send, ok, fail, info, warn, openModal, dialog, setHeading,
     content: $('content'), me: () => me,
   });
 
