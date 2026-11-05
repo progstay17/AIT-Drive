@@ -435,3 +435,55 @@ select.input { appearance: auto; }
 @media (max-width: 680px) {
   .admin-bar { flex-wrap: wrap; }
 }
+
+
+/* Interaction polish: restrained motion, clear state changes, no decorative noise. */
+:root {
+  --motion-enter: cubic-bezier(.2, .75, .25, 1);
+  --motion-exit: cubic-bezier(.4, 0, 1, 1);
+}
+.btn, .sidebar-item, .breadcrumb a, .file-card, .context-menu button {
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:not(:disabled):active { transform: translateY(1px) scale(.985); }
+.btn:focus-visible, .file-card:focus-visible, .sidebar-item:focus-visible {
+  outline-offset: 3px;
+}
+.file-grid .file-card {
+  animation: file-arrive 240ms var(--motion-enter) both;
+}
+.file-grid .file-card:nth-child(2) { animation-delay: 18ms; }
+.file-grid .file-card:nth-child(3) { animation-delay: 36ms; }
+.file-grid .file-card:nth-child(4) { animation-delay: 54ms; }
+.file-grid .file-card:nth-child(5) { animation-delay: 72ms; }
+.file-grid .file-card:nth-child(6) { animation-delay: 90ms; }
+.file-grid .file-card:nth-child(7) { animation-delay: 108ms; }
+.file-grid .file-card:nth-child(8) { animation-delay: 126ms; }
+@keyframes file-arrive {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.file-card:active { transform: translateY(0) scale(.99); }
+.progress-value { transition: width 180ms linear; }
+.toast {
+  transform-origin: 100% 100%;
+  transition: opacity 160ms var(--motion-exit), transform 160ms var(--motion-exit);
+}
+.toast.is-leaving { opacity: 0; transform: translateY(6px) scale(.985); pointer-events: none; }
+.toast:hover { border-color: var(--line-strong); }
+.toast:focus-within { border-color: var(--accent); }
+.toast-info .toast-mark { color: var(--info); }
+.toast-warning .toast-mark { color: var(--warning); }
+.toast-close { opacity: .65; transition: opacity var(--t-fast), background var(--t-fast); }
+.toast:hover .toast-close, .toast-close:focus-visible { opacity: 1; }
+.toast-actions:empty { display: none; }
+.modal-backdrop { backdrop-filter: blur(2px); }
+.dropzone-overlay { transition: opacity 140ms ease, background 140ms ease; }
+.status-dot { transition: background var(--t-base), box-shadow var(--t-base); }
+.status-dot.on { box-shadow: 0 0 0 3px var(--accent-soft); }
+.status-dot.off { box-shadow: 0 0 0 3px var(--danger-soft); }
+@media (prefers-reduced-motion: reduce) {
+  .file-grid .file-card { animation: none !important; }
+  .toast { transition: none !important; }
+  .modal-backdrop { backdrop-filter: none; }
+}
