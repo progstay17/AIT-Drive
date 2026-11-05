@@ -25,7 +25,15 @@ Standalone storage service for AIT Drive. This repository runs on the Windows PC
 4. Confirm `agent.env` contains `AGENT_HOST=127.0.0.1`, `AGENT_PORT=4001`, the correct `STORAGE_ROOT`, and the same `AGENT_TOKEN` configured in the web gateway.
 5. Start with `start-agent.bat`. Local health check: `curl http://127.0.0.1:4001/health`.
 
-## Publish with Caddy Panel SSH reverse tunnel (current deployment)`r`n`r`n1. Keep `AGENT_HOST=127.0.0.1` and `AGENT_PORT=4001` in `agent.env`.`r`n2. In Caddy Panel, create an SSH reverse-tunnel client that listens on VPS `127.0.0.1:8081` and forwards to PC `127.0.0.1:4001`.`r`n3. Configure the Caddy Panel site to reverse-proxy to `127.0.0.1:8081` and enable HTTPS.`r`n4. Use `run-tunnel.ps1.example` as a template for the reconnect loop. Keep the actual `run-tunnel.ps1` and private SSH key local.`r`n5. Set the gateway `AGENT_URL` to the public HTTPS hostname and keep `AGENT_TOKEN` identical on both sides.`r`n`r`n## Publish with Cloudflare Tunnel
+## Publish with Caddy Panel SSH reverse tunnel (current deployment)
+
+1. Keep `AGENT_HOST=127.0.0.1` and `AGENT_PORT=4001` in `agent.env`.
+2. In Caddy Panel, create an SSH reverse-tunnel client that listens on VPS `127.0.0.1:8081` and forwards to PC `127.0.0.1:4001`.
+3. Configure the Caddy Panel site to reverse-proxy to `127.0.0.1:8081` and enable HTTPS.
+4. Use `run-tunnel.ps1.example` as a template for the reconnect loop. Keep the actual `run-tunnel.ps1` and private SSH key local.
+5. Set the gateway `AGENT_URL` to the public HTTPS hostname and keep `AGENT_TOKEN` identical on both sides.
+
+## Publish with Cloudflare Tunnel
 
 The public hostname must be on a domain/zone you control in Cloudflare. The `sslip.io` hostname used by the web app is not a Cloudflare-managed DNS zone, so it cannot be used as a named-tunnel hostname unless you separately control that DNS zone.
 
