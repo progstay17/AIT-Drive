@@ -287,4 +287,5 @@ app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'), // always revalidate (ETag) so UI updates show immediately
 }));
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Web listening on :${PORT}  agent=${AGENT_URL}`));
+// tanpa host: dual-stack (IPv4 dan IPv6), supaya "localhost" milik healthcheck Coolify (bisa ::1) juga terjangkau
+app.listen(PORT, () => console.log(`Web listening on :${PORT}  agent=${AGENT_URL}`));
