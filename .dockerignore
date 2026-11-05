@@ -1,0 +1,10 @@
+**/node_modules
+.git
+agent
+tests
+docs
+storage
+*.env
+!*.env.example
+web/local.env
+web/coolify-secrets.txt
