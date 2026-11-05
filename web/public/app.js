@@ -146,6 +146,7 @@
       close() {
         if (removed) return;
         removed = true; stopTimer();
+        document.removeEventListener('visibilitychange', onVisibility);
         t.classList.add('is-leaving');
         const finish = () => t.remove();
         if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) finish();
@@ -176,7 +177,8 @@
     t.addEventListener('pointerleave', startTimer);
     t.addEventListener('focusin', stopTimer);
     t.addEventListener('focusout', (e) => { if (!t.contains(e.relatedTarget)) startTimer(); });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) stopTimer(); else startTimer(); }, { once: true });
+    const onVisibility = () => { if (document.hidden) stopTimer(); else startTimer(); };
+    document.addEventListener('visibilitychange', onVisibility);
     close.onclick = ctl.close;
     startTimer();
     return ctl;
