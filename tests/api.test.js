@@ -157,6 +157,13 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     r = await fetch(A + '/list', { headers: { Authorization: 'Bearer ' + stack.token } });
     check('agent with the right token but no user identity is rejected', r.status === 401, r.status);
 
+    r = await fetch(A + '/admin/users', { headers: { Authorization: 'Bearer ' + stack.token, 'X-AIT-User': '_owner' } });
+    check('the agent has no account/admin API anymore (storage only)', r.status === 404, r.status);
+    r = await fetch(A + '/sys/disk', { headers: { Authorization: 'Bearer ' + stack.token } });
+    d = await r.json();
+    check('agent /sys/disk reports disk numbers to the gateway', r.status === 200 && d.total > 0 && d.free > 0, JSON.stringify(d));
+    r = await fetch(A + '/sys/disk');
+    check('agent /sys/* needs the token too (401)', r.status === 401, r.status);
     r = await own.post('delete', { path: 'Docs' });
     check('delete returns 200', r.status === 200, r.status);
     check('deleted folder is kept in the owner\'s .trash on disk', fs.readdirSync(path.join(OWN, '.trash')).some((n) => n.endsWith('__Docs')));
@@ -201,7 +208,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     r = await own.get('/api/admin/users');
     d = await r.json();
     check('user list has 3 accounts, no password material', d.users.length === 3 && !JSON.stringify(d).includes('scrypt') && !JSON.stringify(d).includes('"pw"'), JSON.stringify(d).slice(0, 200));
-    check('password is stored hashed (scrypt) on the PC', fs.readFileSync(path.join(S, '.ait', 'users.json'), 'utf8').includes('scrypt$') && !fs.readFileSync(path.join(S, '.ait', 'users.json'), 'utf8').includes('alice-pass-1'));
+    check('password is stored hashed (scrypt) in the gateway data folder (not on the PC)', fs.readFileSync(path.join(stack.dataDir, 'users.json'), 'utf8').includes('scrypt$') && !fs.readFileSync(path.join(stack.dataDir, 'users.json'), 'utf8').includes('alice-pass-1'));
 
     // ============================================================ alice: isolation + quota
     const al = client(B);
@@ -396,7 +403,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('a deleted username can be created again with a fresh folder', r.status === 201 && fs.readdirSync(path.join(S, 'users', 'bob')).length === 0, r.status);
 
     // ============================================================ overbooking mode
-    const stack2 = await startStack({ agentEnv: { ALLOW_OVERBOOK: 'true' } });
+    const stack2 = await startStack({ webEnv: { ALLOW_OVERBOOK: 'true' } });
     try {
       const o2 = client(stack2.webUrl);
       await o2.login(stack2.creds.user, stack2.creds.pass);
@@ -405,6 +412,14 @@ function chunkedUpload(base, cookie, dir, name, buf) {
       r = await o2.send('POST', '/api/admin/users', { username: 'whale', password: 'password-12', quota: ovb.capacity * 10 });
       check('with overbooking on, a quota above disk capacity is accepted', r.status === 201, r.status);
     } finally { await stack2.stop(); }
+
+    // ============================================================ accounts live in the gateway volume
+    const web2 = await stack.startWeb();
+    const re = client(web2);
+    r = await re.login('alice', 'brand-new-pass-3');
+    check('accounts survive a gateway restart (same data volume)', r.status === 200, r.status);
+    me = await (await re.get('/api/me')).json();
+    check('...with the same quota and permissions', me.quota === 2 * MB && me.role === 'user', JSON.stringify(me));
 
     // ============================================================ static UI, branding, headers
     r = await fetch(B + '/');
@@ -433,14 +448,31 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     r = await bad.get('/api/list?path=');
     d = await r.json();
     check('wrong AGENT_TOKEN (owner session) gives 502 with a clear message', r.status === 502 && /Token agent/.test(d.error), r.status + ' ' + JSON.stringify(d));
-    r = await client(badWeb).login('alice', 'brand-new-pass-3');
+    const badUser = client(badWeb);
+    r = await badUser.login('alice', 'brand-new-pass-3');
+    check('regular users can log in even with a wrong AGENT_TOKEN (login is local)', r.status === 200, r.status);
+    r = await badUser.get('/api/list?path=');
     d = await r.json();
-    check('wrong AGENT_TOKEN at login of a regular user gives 502, not "wrong password"', r.status === 502 && /Token agent/.test(d.error), r.status + ' ' + JSON.stringify(d));
+    check('...and their file calls then show the token message (502)', r.status === 502 && /Token agent/.test(d.error), r.status + ' ' + JSON.stringify(d));
 
     const offWeb = await stack.startWeb({ AGENT_URL: 'http://127.0.0.1:1' });
-    r = await client(offWeb).login('alice', 'brand-new-pass-3');
+    const offUser = client(offWeb);
+    r = await offUser.login('alice', 'brand-new-pass-3');
+    check('regular users can log in while the PC is offline (accounts are on the server)', r.status === 200, r.status);
+    r = await offUser.get('/api/list?path=');
+    check('...and file calls say "PC tidak terjangkau" (502)', r.status === 502 && /PC tidak terjangkau/.test((await r.json()).error), r.status);
+    r = await offUser.get('/api/me');
+    me = await r.json();
+    check('/api/me still works with the PC offline', r.status === 200 && me.id === 'alice', r.status);
+    const offOwnerAdmin = client(offWeb);
+    await offOwnerAdmin.login(stack.creds.user, stack.creds.pass);
+    r = await offOwnerAdmin.get('/api/admin/users');
     d = await r.json();
-    check('PC offline at login of a regular user gives 502 "PC tidak terjangkau"', r.status === 502 && /PC tidak terjangkau/.test(d.error), r.status + ' ' + JSON.stringify(d));
+    check('admin panel keeps working with the PC offline (users listed, online:false)', r.status === 200 && d.users.length > 0 && d.online === false, r.status);
+    r = await offOwnerAdmin.send('POST', '/api/admin/users', { username: 'offline1', password: 'password-12', quota: 2 * MB });
+    check('creating a quota account offline is refused (capacity cannot be checked)', r.status === 502, r.status);
+    r = await offOwnerAdmin.send('DELETE', '/api/admin/users/carol');
+    check('deleting an account offline is refused so its data is not orphaned', r.status === 502, r.status);
     const offOwner = client(offWeb);
     r = await offOwner.login(stack.creds.user, stack.creds.pass);
     check('owner can still log in while the PC is offline', r.status === 200, r.status);

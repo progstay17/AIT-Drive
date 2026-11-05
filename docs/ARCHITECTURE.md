@@ -110,9 +110,10 @@ Dibuat oleh Fadhil Ghifarion 法迪 for AIT.
 
 ## Model banyak akun (v2)
 
-- **Identitas**: gateway memverifikasi sesi (cookie bertanda tangan berisi `u`, `tv`, `exp`) dan meneruskan identitas ke agent lewat header. Owner berasal dari environment variable; akun lain dari `.ait/users.json` di PC dan diverifikasi lewat `POST /admin/verify`.
-- **Penegakan di agent**: agent menentukan root `users/<id>/`, memeriksa izin dan kuota, dan menolak path keluar root. Gateway tidak dipercaya untuk keputusan izin.
-- **Kuota**: hitungan pemakaian dijaga bertahap (unggah, hapus permanen) dan disinkronkan ulang dengan menelusuri folder (TTL 5 menit, ditunda saat ada unggahan berjalan). Unggahan dicek lewat `Content-Length` dan oleh penghitung dalam aliran yang menghentikan data begitu melewati kuota. Sampah ikut dihitung.
-- **Alokasi**: `kapasitas = disk kosong + pemakaian akun non-owner`; jumlah kuota harus `<=` kapasitas kecuali `ALLOW_OVERBOOK=true`.
-- **Pencabutan sesi**: nomor versi `tv` per akun dibandingkan di setiap permintaan.
+- **Coolify = server utama.** Gateway memegang login, akun, kuota, izin, dan panel admin (`users.json` di volume `/data`). Owner berasal dari environment variable.
+- **PC = storage.** Agent hanya melakukan operasi file di `users/<id>/` dan menegakkan kuota serta izin yang dikirim gateway lewat header `X-AIT-Quota` / `X-AIT-Perms`, dipercaya hanya bersama `AGENT_TOKEN` yang benar.
+- **Hak dibaca ulang di setiap permintaan** dari database gateway, jadi perubahan kuota, izin, atau status akun berlaku seketika. Sesi dicabut lewat nomor versi `tv` per akun.
+- **Kuota**: agent menjaga hitungan pemakaian secara bertahap dan menyinkronkannya dengan menelusuri folder (TTL 5 menit, ditunda saat ada unggahan berjalan). Unggahan dicek lewat `Content-Length` dan oleh penghitung dalam aliran. Sampah ikut dihitung.
+- **Alokasi**: gateway menghitung `kapasitas = disk kosong (dari agent) + pemakaian akun non-owner`; jumlah kuota harus `<=` kapasitas kecuali `ALLOW_OVERBOOK=true`.
+- **PC mati**: login, akun, dan panel admin tetap jalan; file tidak terbuka. Membuat akun berkuota dan menghapus akun ditolak karena butuh PC.
 - **Migrasi**: lihat [MULTI-USER.md](MULTI-USER.md).

@@ -10,6 +10,8 @@ Dari nol sampai AIT Drive bisa dibuka lewat domain kamu. Urutannya: **agent di P
 
 ## 1. Agent di PC
 
+> Cara cepat: jalankan `agent\setup-agent.bat`. Jendela **pilih folder** muncul untuk menentukan di mana file disimpan, lalu `agent.env` dibuat otomatis dengan `AGENT_TOKEN` acak dan ditampilkan untuk disalin ke Coolify. Langkah manual di bawah memberi hasil yang sama.
+
 ```bat
 cd C:\cloud-drive
 npm run install:all
@@ -170,12 +172,18 @@ Seluruh data kamu ada di folder `STORAGE_ROOT` di PC. Backup folder itu (termasu
 
 Dibuat oleh Fadhil Ghifarion 法迪 for AIT.
 
-## Memperbarui dari v1 ke v2 (multi-akun)
+## Pengaturan wajib di Coolify
 
-1. Di PC: tarik kode terbaru, hentikan agent lama, jalankan `agent\start-agent.bat`. Isi folder penyimpanan lama otomatis dipindah ke `users/_owner` (lihat baris `Migrated ...` di log).
-2. Push ke GitHub, lalu **Redeploy** di Coolify. Tidak ada variabel baru yang wajib.
-3. Perbarui agent **sebelum** web. Web v2 tidak bisa bekerja dengan agent v1.
+1. **Build Pack: Dockerfile**, Base Directory `/` (atau `/web`), Port `3000`. Jangan Railpack/Nixpacks.
+2. **Persistent Storage**: tambahkan volume dengan path tujuan `/data`. Di situlah akun, kuota, dan izin disimpan. Tanpa ini akun hilang setiap redeploy.
+3. **Environment Variables**: `ADMIN_USER`, `ADMIN_PASSWORD` (bebas kamu tentukan), `SESSION_SECRET`, `AGENT_URL`, `AGENT_TOKEN` (satu-satunya yang harus sama dengan PC), `COOKIE_SECURE=true`. Opsional: `DATA_DIR` (default `/data`), `ALLOW_OVERBOOK`.
+4. Redeploy setiap kali variabel diubah.
+
+## Memperbarui dari versi sebelumnya
+
+1. Di PC: tarik kode terbaru, hentikan agent lama, jalankan `agent\start-agent.bat`. Isi folder penyimpanan v1 otomatis dipindah ke `users/_owner` (lihat baris `Migrated ...` di log).
+2. Di Coolify: tambah Persistent Storage ke `/data`, push ke GitHub, Redeploy.
+3. Perbarui agent dan web bersamaan.
 4. Login sebagai owner dan buka **Admin** untuk membuat akun.
-5. Opsional: `ALLOW_OVERBOOK=true` di `agent/agent.env`.
 
-Rincian dan rollback: [MULTI-USER.md](MULTI-USER.md).
+Rincian: [MULTI-USER.md](MULTI-USER.md).

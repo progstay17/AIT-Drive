@@ -45,8 +45,8 @@ Cloud drive pribadi dengan **file yang tetap tersimpan di PC kamu sendiri**, dib
 Browser ──HTTPS──> Coolify: web/ (login, UI, proxy) ──tunnel──> PC kamu: agent/ ──> folder penyimpanan
 ```
 
-- **`agent/`** berjalan di PC. Hanya membuka satu folder (`STORAGE_ROOT`) lewat API HTTP yang dilindungi token. Agent juga menyimpan akun, kuota, dan izin di `STORAGE_ROOT/.ait/`, dan memaksakannya. Secara default hanya mendengarkan `127.0.0.1`.
-- **`web/`** berjalan di server (Coolify/Docker). Menangani login, menyajikan UI, dan meneruskan permintaan ke agent dengan token rahasia yang tidak pernah dikirim ke browser.
+- **`agent/`** berjalan di PC dan **hanya mengurus file**: membuka satu folder (`STORAGE_ROOT`, yang kamu pilih lewat `agent\setup-agent.bat`) lewat API HTTP yang dilindungi token. Kuota dan izin dikirim gateway di setiap permintaan.
+- **`web/`** berjalan di server (Coolify/Docker) dan menjadi **server utama**: login, akun, kuota, izin, panel admin, dan UI. Data akun disimpan di volume `/data`. Meneruskan permintaan file ke agent dengan token rahasia yang tidak pernah dikirim ke browser.
 - **Tunnel** menghubungkan server ke agent tanpa membuka port di router.
 
 Penjelasan rinci: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -66,8 +66,8 @@ Cara ini menjalankan semuanya di satu PC untuk dicoba.
 npm run install:all
 
 # 2. buat konfigurasi agent
-copy agent\agent.env.example agent\agent.env      # Windows
-# lalu isi AGENT_TOKEN dengan string acak minimal 24 karakter:
+agent\setup-agent.bat                           # Windows: pilih folder storage lewat jendela, agent.env dibuat otomatis
+# (manual: salin agent\agent.env.example menjadi agent\agent.env lalu isi AGENT_TOKEN acak minimal 24 karakter)
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 # 3. jalankan agent (jendela terpisah)
@@ -113,7 +113,6 @@ Langkah lengkap dengan perintah: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 | `STORAGE_ROOT` | `../storage` | Folder yang menjadi drive |
 | `AGENT_HOST` | `127.0.0.1` | Alamat bind. Biarkan lokal kalau memakai tunnel di PC yang sama |
 | `AGENT_PORT` | `4001` | Port agent |
-| `ALLOW_OVERBOOK` | `false` | `true` mengizinkan total kuota melebihi kapasitas disk (lihat [docs/MULTI-USER.md](docs/MULTI-USER.md)) |
 
 ### Web (environment variable di Coolify, atau `web/local.env` untuk lokal)
 
@@ -127,6 +126,8 @@ Langkah lengkap dengan perintah: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 | `COOKIE_SECURE` | `true` | Biarkan `true` di HTTPS. Set `false` hanya untuk uji lokal lewat http |
 | `SESSION_HOURS` | `168` | Lama sesi login (jam) |
 | `PORT` | `3000` | Port web |
+| `DATA_DIR` | `web/data` (Docker: `/data`) | Tempat `users.json` (akun, kuota, izin). Di Coolify **wajib** dipasang Persistent Storage ke `/data` |
+| `ALLOW_OVERBOOK` | `false` | `true` mengizinkan total kuota melebihi kapasitas disk (lihat [docs/MULTI-USER.md](docs/MULTI-USER.md)) |
 
 Template ada di `agent/agent.env.example` dan `web/.env.example`.
 
@@ -172,7 +173,7 @@ ait-drive/
 ```bash
 npm run install:all   # sekali saja
 npm test              # semua tes
-npm run test:api      # API, keamanan, multi-akun, kuota (147 pemeriksaan)
+npm run test:api      # API, keamanan, multi-akun, kuota, agent storage-saja (158 pemeriksaan)
 npm run test:ui       # tampilan di jsdom termasuk panel admin (58 pemeriksaan)
 ```
 
@@ -186,6 +187,7 @@ Ringkas: agent hanya menerima token yang benar, web tidak pernah mengirim token 
 
 - **Tanpa pendaftaran (signup) terbuka.** Ini disengaja: pendaftaran terbuka pada drive yang menempel ke PC pribadi berarti orang asing bisa menulis ke disk kamu. Akun hanya dibuat admin.
 - **Kuota adalah batas logis, bukan ruang yang dikunci.** Panel mencegah total kuota melebihi kapasitas disk, tetapi file di luar AIT Drive tetap bisa mengurangi ruang kosong.
+- **Akun disimpan di server (volume `/data` Coolify).** Cadangkan volume itu. File pengguna ada di PC, jadi saat PC mati login dan panel admin tetap jalan tetapi file tidak terbuka.
 - Belum ada 2FA, daftar sesi aktif, atau berbagi antar akun.
 - PC harus menyala dan agent berjalan. Saat PC mati, UI menampilkan "Koneksi terputus".
 - Link berbagi tidak bisa dicabut satu per satu. Mengganti `SESSION_SECRET` mencabut semuanya (dan mengeluarkan semua sesi login).

@@ -1,10 +1,11 @@
 'use strict';
-// AIT Drive - storage agent (runs on the local PC)
+// AIT Drive - storage agent (runs on the local PC). Storage only: accounts, quotas and permissions
+// live in the web gateway (Coolify); the gateway tells this agent, per request, who is calling and
+// what they may do (X-AIT-User / X-AIT-Quota / X-AIT-Perms), authenticated by the shared AGENT_TOKEN.
 //
 // Layout on disk (STORAGE_ROOT):
 //   users/<id>/        each account's private drive (the owner uses users/_owner)
 //   users/<id>/.trash  soft-deleted items (counted against the quota)
-//   .ait/users.json    accounts (scrypt password hashes, quota, permissions)
 //   .ait/archive/      data of deleted accounts (never destroyed automatically)
 const express = require('express');
 const Busboy = require('busboy');
@@ -12,29 +13,21 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
-const { promisify } = require('util');
 const { Transform, pipeline } = require('stream');
-const scrypt = promisify(crypto.scrypt);
 
 const PORT = parseInt(process.env.AGENT_PORT || '4001', 10);
 const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const TOKEN = process.env.AGENT_TOKEN || '';
 const ROOT = path.resolve(process.env.STORAGE_ROOT || path.join(__dirname, '..', 'storage'));
-const ALLOW_OVERBOOK = (process.env.ALLOW_OVERBOOK || 'false') === 'true';
 
 const TRASH = '.trash';
 const USERS_DIR = path.join(ROOT, 'users');
 const META_DIR = path.join(ROOT, '.ait');
-const DB_FILE = path.join(META_DIR, 'users.json');
 const ARCHIVE_DIR = path.join(META_DIR, 'archive');
 const OWNER_ID = '_owner';
-const MIN_QUOTA = 1024 * 1024; // 1 MB
-const MAX_QUOTA = 1e15;
 const ALL_PERMS = Object.freeze({ upload: true, modify: true, delete: true, share: true });
-const DEFAULT_PERMS = Object.freeze({ upload: true, modify: true, delete: true, share: false });
 const PERM_LABEL = { upload: 'mengunggah', modify: 'mengubah (buat folder, ganti nama, pindah)', delete: 'menghapus', share: 'membagikan link' };
 const USER_RE = /^[a-z0-9][a-z0-9._-]{1,30}[a-z0-9]$/;
-const RESERVED_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/;
 
 if (TOKEN.length < 24) {
   console.error('AGENT_TOKEN must be set and at least 24 characters long.');
@@ -81,38 +74,6 @@ fs.mkdirSync(ROOT, { recursive: true });
 migrateV1();
 fs.mkdirSync(USERS_DIR, { recursive: true });
 fs.mkdirSync(META_DIR, { recursive: true });
-
-// ---------- accounts database ----------
-let db = { version: 1, users: {} };
-try {
-  db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  if (!db.users || typeof db.users !== 'object') db.users = {};
-} catch (e) {
-  if (e.code !== 'ENOENT') { console.error('Cannot read ' + DB_FILE + ': ' + e.message); process.exit(1); }
-}
-let saveChain = Promise.resolve();
-function saveDb() {
-  saveChain = saveChain.then(async () => {
-    const tmp = DB_FILE + '.tmp';
-    await fsp.writeFile(tmp, JSON.stringify(db, null, 2));
-    await fsp.rename(tmp, DB_FILE);
-  });
-  return saveChain;
-}
-
-async function hashPw(pw) {
-  const salt = crypto.randomBytes(16);
-  const h = await scrypt(pw, salt, 64);
-  return `scrypt$${salt.toString('base64')}$${h.toString('base64')}`;
-}
-async function checkPw(pw, stored) {
-  const [, s, h] = String(stored || '').split('$');
-  if (!s || !h) return false;
-  const want = Buffer.from(h, 'base64');
-  const got = await scrypt(pw, Buffer.from(s, 'base64'), want.length);
-  return got.length === want.length && crypto.timingSafeEqual(got, want);
-}
-const dummyHash = hashPw('timing-equalizer'); // so unknown users cost the same as known ones
 
 // ---------- disk + usage accounting ----------
 async function disk() {
@@ -181,67 +142,62 @@ app.use((req, res, next) => {
   next();
 });
 
-// credential check used by the gateway at login (no user context yet)
-app.post('/admin/verify', wrap(async (req, res) => {
-  const { username, password } = req.body || {};
-  const id = String(username || '').trim().toLowerCase();
-  const u = USER_RE.test(id) ? db.users[id] : null;
-  const ok = await checkPw(typeof password === 'string' ? password : '', u ? u.pw : await dummyHash);
-  if (!u || !ok) return res.status(401).json({ error: 'Username atau password salah.' });
-  if (!u.active) return res.status(403).json({ error: 'Akun dinonaktifkan. Hubungi admin.' });
-  u.lastLogin = Date.now();
-  saveDb().catch((e) => console.error('saveDb failed', e));
-  res.json({ id: u.id, tv: u.tv, role: u.role });
+// ---------- system endpoints (gateway only: bearer token, no user identity) ----------
+const validId = (id) => id === OWNER_ID || USER_RE.test(String(id));
+app.get('/sys/disk', wrap(async (req, res) => res.json(await disk())));
+
+app.post('/sys/usage', wrap(async (req, res) => {
+  const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.slice(0, 1000) : [];
+  const out = {};
+  for (const id of ids) {
+    if (!validId(id)) continue;
+    const u = await getUsage({ id, root: userRoot(id) });
+    out[id] = { used: u.used, trash: u.trash };
+  }
+  res.json(out);
 }));
 
-// who is calling? The gateway authenticated the person; we resolve their rights here.
+app.post('/sys/users/:id/init', wrap(async (req, res) => {
+  const id = req.params.id;
+  if (!validId(id)) throw httpError(400, 'invalid id');
+  await fsp.mkdir(userRoot(id), { recursive: true });
+  ensuredRoots.add(id);
+  res.json({ ok: true });
+}));
+
+// account deleted in the gateway: its folder is moved to .ait/archive (never destroyed)
+app.post('/sys/users/:id/archive', wrap(async (req, res) => {
+  const id = req.params.id;
+  if (!validId(id) || id === OWNER_ID) throw httpError(400, 'invalid id');
+  let archived = null;
+  if (fs.existsSync(userRoot(id))) {
+    await fsp.mkdir(ARCHIVE_DIR, { recursive: true });
+    archived = `${id}__${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    await fsp.rename(userRoot(id), path.join(ARCHIVE_DIR, archived));
+  }
+  usage.delete(id); ensuredRoots.delete(id);
+  res.json({ ok: true, archived });
+}));
+
+// ---------- who is calling? The gateway authenticated the person and sends their current rights ----------
 const ensuredRoots = new Set();
 app.use((req, res, next) => {
-  const sessionBad = (status, msg) => { res.setHeader('X-AIT-Reason', 'session'); return res.status(status).json({ error: msg }); };
-  let ctx;
-  if (req.headers['x-ait-owner'] === '1') {
-    let name = 'owner';
-    try { name = decodeURIComponent(String(req.headers['x-ait-name'] || 'owner')).slice(0, 64); } catch {}
-    ctx = { id: OWNER_ID, name, role: 'owner', quota: null, perms: ALL_PERMS };
-  } else {
-    const id = String(req.headers['x-ait-user'] || '');
-    const u = USER_RE.test(id) ? db.users[id] : null;
-    if (!u) return sessionBad(401, 'Akun tidak ditemukan. Silakan masuk lagi.');
-    if (!u.active) return sessionBad(403, 'Akun dinonaktifkan. Hubungi admin.');
-    if (String(u.tv) !== String(req.headers['x-ait-tv'])) return sessionBad(401, 'Sesi tidak berlaku lagi. Silakan masuk lagi.');
-    ctx = { id, name: id, role: u.role, quota: u.quota == null ? null : u.quota, perms: u.role === 'admin' ? ALL_PERMS : u.perms };
-  }
-  ctx.root = userRoot(ctx.id);
-  if (!ensuredRoots.has(ctx.id)) { fs.mkdirSync(ctx.root, { recursive: true }); ensuredRoots.add(ctx.id); }
+  const id = String(req.headers['x-ait-user'] || '');
+  if (!validId(id)) { res.setHeader('X-AIT-Reason', 'identity'); return res.status(401).json({ error: 'unauthorized' }); }
+  const q = String(req.headers['x-ait-quota'] || '');
+  const quota = q === '' ? null : Number(q);
+  if (quota !== null && !(Number.isFinite(quota) && quota >= 0)) return res.status(400).json({ error: 'invalid quota header' });
+  const have = new Set(String(req.headers['x-ait-perms'] || '').split(',').map((x) => x.trim()).filter(Boolean));
+  const perms = {};
+  for (const k of Object.keys(ALL_PERMS)) perms[k] = have.has(k);
+  const ctx = { id, quota, perms, root: userRoot(id) };
+  if (!ensuredRoots.has(id)) { fs.mkdirSync(ctx.root, { recursive: true }); ensuredRoots.add(id); }
   req.ctx = ctx;
   next();
 });
 function need(ctx, perm) {
   if (!ctx.perms[perm]) throw httpError(403, `Akun kamu tidak punya izin untuk ${PERM_LABEL[perm]}.`);
 }
-
-// ---------- me ----------
-app.get('/me', (req, res) => {
-  const c = req.ctx;
-  res.json({
-    id: c.id, name: c.name, role: c.role, quota: c.quota, perms: c.perms,
-    canAdmin: c.role === 'owner' || c.role === 'admin',
-    canChangePassword: c.role !== 'owner',
-  });
-});
-
-app.post('/me/password', wrap(async (req, res) => {
-  const c = req.ctx;
-  if (c.role === 'owner') throw httpError(400, 'Password owner diubah lewat ADMIN_PASSWORD di server.');
-  const { current, next } = req.body || {};
-  if (typeof next !== 'string' || next.length < 8 || next.length > 200) throw httpError(400, 'Password baru minimal 8 karakter.');
-  const u = db.users[c.id];
-  if (!(await checkPw(typeof current === 'string' ? current : '', u.pw))) throw httpError(400, 'Password saat ini salah.');
-  const pw = await hashPw(next);
-  u.pw = pw; u.tv = (u.tv || 1) + 1; u.updatedAt = Date.now();
-  await saveDb();
-  res.json({ ok: true, relogin: true });
-}));
 
 // ---------- files ----------
 app.get('/list', wrap(async (req, res) => {
@@ -455,142 +411,6 @@ app.post('/trash/empty', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---------- admin ----------
-const admin = express.Router();
-admin.use((req, res, next) => {
-  if (req.ctx.role !== 'owner' && req.ctx.role !== 'admin') return next(httpError(403, 'Hanya admin yang boleh membuka ini.'));
-  next();
-});
-
-function normPerms(input, base) {
-  const out = { ...(base || DEFAULT_PERMS) };
-  if (input && typeof input === 'object') for (const k of Object.keys(ALL_PERMS)) if (k in input) out[k] = !!input[k];
-  return out;
-}
-function parseQuota(v, role) {
-  if (v === null || v === undefined || v === '') {
-    if (role === 'admin') return null;
-    throw httpError(400, 'Kuota wajib diisi untuk pengguna biasa.');
-  }
-  const n = Math.floor(Number(v));
-  if (!Number.isFinite(n) || n < MIN_QUOTA) throw httpError(400, 'Kuota minimal 1 MB.');
-  if (n > MAX_QUOTA) throw httpError(400, 'Kuota terlalu besar.');
-  return n;
-}
-async function overview(excludeId) {
-  const d = await disk();
-  let usedUsers = 0, allocated = 0, allocatedOthers = 0;
-  for (const u of Object.values(db.users)) {
-    const us = await getUsage({ id: u.id, root: userRoot(u.id) });
-    usedUsers += us.used;
-    if (u.quota != null) { allocated += u.quota; if (u.id !== excludeId) allocatedOthers += u.quota; }
-  }
-  const owner = await getUsage({ id: OWNER_ID, root: userRoot(OWNER_ID) });
-  const capacity = d.free + usedUsers;
-  return {
-    diskTotal: d.total, diskFree: d.free, ownerUsed: owner.used, usedUsers,
-    allocated, allocatedOthers, capacity, unallocated: Math.max(0, capacity - allocated),
-    allowOverbook: ALLOW_OVERBOOK, userCount: Object.keys(db.users).length,
-  };
-}
-async function checkAllocation(excludeId, quota) {
-  if (ALLOW_OVERBOOK || quota == null) return;
-  const o = await overview(excludeId);
-  if (o.allocatedOthers + quota > o.capacity) {
-    throw httpError(400, `Alokasi melebihi kapasitas disk. Sisa yang bisa dialokasikan: ${fmtBytes(Math.max(0, o.capacity - o.allocatedOthers))}.`);
-  }
-}
-async function publicUser(u) {
-  const us = await getUsage({ id: u.id, root: userRoot(u.id) });
-  return {
-    id: u.id, role: u.role, active: !!u.active, quota: u.quota == null ? null : u.quota,
-    perms: u.role === 'admin' ? { ...ALL_PERMS } : { ...u.perms },
-    used: us.used, trash: us.trash, createdAt: u.createdAt, lastLogin: u.lastLogin || null,
-  };
-}
-function mustManage(ctx, target, newRole) {
-  if ((target && target.role === 'admin') || newRole === 'admin') {
-    if (ctx.role !== 'owner') throw httpError(403, 'Hanya owner yang boleh mengelola akun admin.');
-  }
-}
-const checkPassword = (p) => {
-  if (typeof p !== 'string' || p.length < 8) throw httpError(400, 'Password minimal 8 karakter.');
-  if (p.length > 200) throw httpError(400, 'Password terlalu panjang.');
-};
-
-admin.get('/overview', wrap(async (req, res) => res.json(await overview())));
-
-admin.get('/users', wrap(async (req, res) => {
-  const list = [];
-  for (const u of Object.values(db.users)) list.push(await publicUser(u));
-  list.sort((a, b) => a.id.localeCompare(b.id));
-  res.json({ users: list });
-}));
-
-admin.post('/users', wrap(async (req, res) => {
-  const b = req.body || {};
-  const id = String(b.username || '').trim().toLowerCase();
-  if (!USER_RE.test(id) || RESERVED_RE.test(id.split('.')[0])) {
-    throw httpError(400, 'Username 3-32 karakter: huruf kecil, angka, titik, minus, garis bawah (harus diawali dan diakhiri huruf/angka).');
-  }
-  const role = b.role === 'admin' ? 'admin' : 'user';
-  mustManage(req.ctx, null, role);
-  checkPassword(b.password);
-  const quota = parseQuota(b.quota, role);
-  const perms = normPerms(b.perms);
-  const pw = await hashPw(b.password);
-  if (db.users[id] || fs.existsSync(userRoot(id))) throw httpError(409, 'Username sudah dipakai.');
-  await checkAllocation(null, quota);
-  const now = Date.now();
-  db.users[id] = { id, role, active: b.active === false ? false : true, quota, perms, pw, tv: 1, createdAt: now, updatedAt: now };
-  await saveDb();
-  fs.mkdirSync(userRoot(id), { recursive: true });
-  ensuredRoots.add(id);
-  res.status(201).json(await publicUser(db.users[id]));
-}));
-
-admin.patch('/users/:id', wrap(async (req, res) => {
-  const id = String(req.params.id || '');
-  const u = USER_RE.test(id) ? db.users[id] : null;
-  if (!u) throw httpError(404, 'Pengguna tidak ditemukan.');
-  const b = req.body || {};
-  const newRole = 'role' in b ? (b.role === 'admin' ? 'admin' : 'user') : u.role;
-  mustManage(req.ctx, u, newRole);
-
-  let quota = u.quota == null ? null : u.quota;
-  if ('quota' in b || newRole !== u.role) quota = parseQuota('quota' in b ? b.quota : quota, newRole);
-  const perms = normPerms(b.perms, u.perms);
-  let pw = null;
-  if (b.password !== undefined && b.password !== '') { checkPassword(b.password); pw = await hashPw(b.password); }
-  const active = 'active' in b ? !!b.active : u.active;
-  if (quota !== (u.quota == null ? null : u.quota)) await checkAllocation(id, quota);
-
-  u.role = newRole; u.quota = quota; u.perms = perms; u.updatedAt = Date.now();
-  if (pw) { u.pw = pw; u.tv = (u.tv || 1) + 1; }
-  if (active !== u.active) { u.active = active; u.tv = (u.tv || 1) + 1; } // any status change ends old sessions
-  await saveDb();
-  res.json(await publicUser(u));
-}));
-
-admin.delete('/users/:id', wrap(async (req, res) => {
-  const id = String(req.params.id || '');
-  const u = USER_RE.test(id) ? db.users[id] : null;
-  if (!u) throw httpError(404, 'Pengguna tidak ditemukan.');
-  mustManage(req.ctx, u, null);
-  let archived = null;
-  if (fs.existsSync(userRoot(id))) {
-    await fsp.mkdir(ARCHIVE_DIR, { recursive: true });
-    archived = `${id}__${new Date().toISOString().replace(/[:.]/g, '-')}`;
-    await fsp.rename(userRoot(id), path.join(ARCHIVE_DIR, archived));
-  }
-  delete db.users[id];
-  usage.delete(id); ensuredRoots.delete(id);
-  await saveDb();
-  res.json({ ok: true, archived });
-}));
-
-app.use('/admin', admin);
-
 // ---------- errors ----------
 app.use((err, req, res, next) => {
   if (res.headersSent) return;
@@ -600,5 +420,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`Agent listening on http://${HOST}:${PORT}  root=${ROOT}  users=${Object.keys(db.users).length}${ALLOW_OVERBOOK ? '  overbook=on' : ''}`);
+  console.log(`Agent listening on http://${HOST}:${PORT}  root=${ROOT}`);
 });

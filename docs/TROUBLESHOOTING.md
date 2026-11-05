@@ -87,12 +87,15 @@ Dibuat oleh Fadhil Ghifarion 法迪 for AIT.
 
 | Gejala | Penyebab dan solusi |
 |---|---|
-| "Alokasi kuota melebihi kapasitas" saat membuat akun | Total kuota akan melebihi disk. Kecilkan kuota, kosongkan disk, atau set `ALLOW_OVERBOOK=true` di agent |
+| "Alokasi kuota melebihi kapasitas" saat membuat akun | Total kuota akan melebihi disk. Kecilkan kuota, kosongkan disk, atau set `ALLOW_OVERBOOK=true` di environment web (Coolify) |
 | Pengguna melihat "Kuota tidak cukup" padahal sudah menghapus file | Hapus hanya memindahkan ke sampah. Tekan **Kosongkan sampah** |
 | Akun biasa tidak bisa unggah, buat folder, atau bagikan | Izinnya dimatikan di panel admin. Edit akun dan centang izin yang diperlukan |
 | "Akun nonaktif" saat login | Aktifkan kembali di panel admin, lalu minta pengguna login ulang |
-| Login pengguna biasa gagal dengan "PC tidak terjangkau" | Agent atau tunnel mati. Owner tetap bisa login tetapi tidak bisa membuka file |
-| Login pengguna biasa gagal dengan "Token agent tidak cocok" | `AGENT_TOKEN` di Coolify berbeda dengan `agent.env` |
+| Pengguna biasa bisa login tetapi file tidak terbuka, pesan "PC tidak terjangkau" | Agent atau tunnel mati. Login, akun, dan panel admin tetap berfungsi karena akun ada di server |
+| Pengguna biasa bisa login tetapi file gagal dengan "Token agent tidak cocok" | `AGENT_TOKEN` di Coolify berbeda dengan `agent.env` |
 | Setelah update file lama "hilang" | Berada di `users/_owner`. Login sebagai owner (`ADMIN_USER`) |
 | Lupa password pengguna | Admin mengisi password baru lewat Edit. Lupa password owner: ganti `ADMIN_PASSWORD` lalu redeploy |
 | Ingin memulihkan akun yang dihapus | Salin folder dari `.ait/archive/<id>__<waktu>` ke `users/<id>` setelah membuat ulang akunnya |
+| Akun yang dibuat hilang setelah redeploy | Volume `/data` belum dipasang. Tambahkan Persistent Storage ke `/data` di Coolify lalu buat ulang akunnya (folder di PC masih ada) |
+| Container berhenti dan log berisi "DATA_DIR ... tidak bisa ditulis" | Volume `/data` tidak bisa ditulis. Pasang Persistent Storage dengan path tujuan `/data` |
+| Jendela pilih folder tidak muncul di setup | Jalankan `agent\setup-agent.bat` dari PowerShell/Explorer di PC itu sendiri (bukan lewat SSH), atau ketik path folder langsung |

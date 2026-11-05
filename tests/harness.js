@@ -44,6 +44,7 @@ function launch(script, env, logs) {
 async function startStack(opts = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ait-drive-test-'));
   const storage = path.join(tmp, 'storage');
+  const dataDir = path.join(tmp, 'data'); // gateway account store (a volume on Coolify)
   fs.mkdirSync(storage);
   if (opts.seed) opts.seed(storage);
   const logs = [];
@@ -64,7 +65,7 @@ async function startStack(opts = {}) {
     const port = await freePort();
     procs.push(launch(path.join(ROOT, 'web', 'server.js'), {
       PORT: String(port), ADMIN_USER: creds.user, ADMIN_PASSWORD: creds.pass, SESSION_SECRET: secret,
-      AGENT_URL: agentUrl, AGENT_TOKEN: token, COOKIE_SECURE: 'false', ...overrides,
+      AGENT_URL: agentUrl, AGENT_TOKEN: token, COOKIE_SECURE: 'false', DATA_DIR: dataDir, ...(opts.webEnv || {}), ...overrides,
     }, logs));
     const url = `http://127.0.0.1:${port}`;
     await waitFor(async () => (await fetch(url + '/auth/me')).ok, 8000, 'web gateway');
@@ -77,7 +78,7 @@ async function startStack(opts = {}) {
     await sleep(300);
     try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 }); } catch {}
   }
-  return { tmp, storage, token, secret, agentUrl, webUrl, creds, startWeb, stop, logs };
+  return { tmp, storage, dataDir, token, secret, agentUrl, webUrl, creds, startWeb, stop, logs };
 }
 
 function reporter(title) {

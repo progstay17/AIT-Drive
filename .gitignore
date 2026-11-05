@@ -11,6 +11,10 @@ web/coolify-secrets.txt
 *.env
 !*.env.example
 
+# akun lokal gateway (web/data) tidak boleh masuk git
+web/data/
+data/
+
 # misc
 npm-debug.log*
 .DS_Store

@@ -213,7 +213,7 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
       await waitFor(() => !$('login-view').hidden, 3000, 'logout');
     };
     const setVal = (id, v) => { $(id).value = v; $(id).dispatchEvent(new w.Event('input', { bubbles: true })); };
-    const usersDb = () => JSON.parse(fs.readFileSync(path.join(stack.storage, '.ait', 'users.json'), 'utf8'));
+    const usersDb = () => JSON.parse(fs.readFileSync(path.join(stack.dataDir, 'users.json'), 'utf8'));
     const dbUser = (id) => usersDb().users[id];
 
     // owner: admin entry visible

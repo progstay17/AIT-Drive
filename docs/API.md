@@ -103,7 +103,7 @@ Semua endpoint gateway berikut memakai cookie sesi dan header `X-Requested-With:
 | `GET /api/admin/users` | owner, admin | Daftar akun (tanpa hash password) beserta pemakaian |
 | `POST /api/admin/users` | owner, admin | `{ username, password, role?, quota?, perms?, active? }`. 201, 400 (validasi/alokasi), 409 (sudah ada) |
 | `PATCH /api/admin/users/:id` | owner, admin | Ubah `password, role, quota, perms (parsial), active`. 404 bila tidak ada |
-| `DELETE /api/admin/users/:id` | owner, admin | Mengarsipkan folder ke `.ait/archive`, mengembalikan `{ archived }` |
+| `DELETE /api/admin/users/:id` | owner, admin | Mengarsipkan folder di PC ke `.ait/archive` (PC harus online), mengembalikan `{ archived }` |
 
 Kode status penting: **403** izin kurang atau akun nonaktif, **413** kuota terlampaui (pesan "Kuota ..."), **401** sesi tidak berlaku. Admin yang menyentuh akun admin mendapat 403.
 
@@ -111,4 +111,4 @@ Endpoint file yang sudah ada (`list`, `search`, `download`, `upload`, `mkdir`, `
 
 ### Gateway ke agent
 
-Selain `Authorization: Bearer <AGENT_TOKEN>`, gateway mengirim `X-AIT-User` dan `X-AIT-TV`; untuk owner `X-AIT-Owner: 1` dan `X-AIT-Name`. Agent menambah `POST /admin/verify` (verifikasi password akun untuk login) dan `/me`, `/me/password`, `/trash/empty`, `/admin/*`. Respons 401 agent membawa `X-AIT-Reason: token` (token bersama salah, gateway menjawab 502) atau `session` (sesi tidak berlaku, diteruskan).
+Gateway mengirim `Authorization: Bearer <AGENT_TOKEN>` ditambah `X-AIT-User` (id akun atau `_owner`), `X-AIT-Quota` (byte, kosong = tanpa batas), dan `X-AIT-Perms` (daftar izin dipisah koma). Agent **tidak menyimpan akun**; ia hanya menegakkan nilai itu. Endpoint khusus gateway di agent: `GET /sys/disk`, `POST /sys/usage {ids}`, `POST /sys/users/:id/init`, `POST /sys/users/:id/archive`. Respons 401 agent berarti `AGENT_TOKEN` salah (gateway menjawab 502). Akun, login, `/me`, dan `/admin/*` ditangani gateway sendiri.

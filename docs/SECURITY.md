@@ -64,10 +64,10 @@ Dibuat oleh Fadhil Ghifarion 法迪 for AIT.
 ## Banyak akun (v2)
 
 - **Tidak ada signup.** Hanya owner dan admin yang membuat akun. Admin tidak bisa membuat, mengubah, atau menghapus admin lain.
-- **Password** pengguna disimpan sebagai hash scrypt (garam acak per akun) di `.ait/users.json` pada PC. Login memakai pembanding waktu-konstan dan hash tiruan agar username yang tidak ada tidak bisa dibedakan dari waktunya.
-- **Identitas dipercaya hanya dari gateway.** Agent menerima header `X-AIT-User`/`X-AIT-TV` hanya bersama token bearer yang benar, lalu memeriksa ulang akun, status aktif, dan nomor versi token ke database di setiap permintaan. Menonaktifkan atau mengganti password berlaku seketika.
+- **Password** pengguna disimpan sebagai hash scrypt (garam acak per akun) di `users.json` pada volume `/data` di server Coolify, bukan di PC. Login memakai pembanding waktu-konstan dan hash tiruan agar username yang tidak ada tidak bisa dibedakan dari waktunya.
+- **Identitas dan hak dikirim gateway ke agent** lewat `X-AIT-User`, `X-AIT-Quota`, `X-AIT-Perms`, dan dipercaya hanya bersama token bearer yang benar. Gateway membaca akun dari databasenya di setiap permintaan, jadi menonaktifkan akun atau mengubah izin/kuota berlaku seketika. Siapa pun yang memegang `AGENT_TOKEN` bisa bertindak sebagai akun mana pun terhadap agent, jadi jaga token itu.
 - **Isolasi**: setiap akun dipaksa berada di `users/<id>/`; `..`, path absolut, dan `.trash` ditolak. Pengecekan dilakukan di agent, bukan hanya di UI.
 - **Izin dan kuota ditegakkan di agent**, jadi memanggil API langsung tidak melewati batas. Tes otomatis memeriksa semuanya.
 - **Link berbagi** dibuat atas nama satu akun, hanya membuka file di folder akun itu, dan mati bila akun dinonaktifkan atau passwordnya diganti.
-- **Owner** hanya ada di environment variable web. Jika `.ait/users.json` rusak, owner tetap bisa masuk.
-- Cadangkan `.ait/` bersama `users/`. Folder akun yang dihapus diarsipkan di `.ait/archive/`, bukan dihapus.
+- **Owner** hanya ada di environment variable web. Jika `users.json` rusak atau volume hilang, owner tetap bisa masuk. Folder di PC tetap utuh, jadi akun dengan username yang sama kembali ke datanya.
+- Cadangkan volume `/data` di Coolify dan folder storage di PC. Folder akun yang dihapus diarsipkan di `.ait/archive/` pada PC, bukan dihapus.

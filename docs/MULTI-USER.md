@@ -1,6 +1,21 @@
 # Banyak akun, kuota, dan panel admin
 
-Mulai versi 2, AIT Drive mendukung banyak akun **tanpa pendaftaran terbuka**. Akun hanya dibuat oleh admin lewat panel admin. Setiap akun punya folder sendiri, batas kapasitas (kuota), dan izin sendiri.
+AIT Drive mendukung banyak akun **tanpa pendaftaran terbuka**. Akun hanya dibuat oleh admin lewat panel admin. Setiap akun punya folder sendiri, batas kapasitas (kuota), dan izin sendiri.
+
+## Siapa menyimpan apa
+
+| Di mana | Isinya |
+|---|---|
+| **Server Coolify** (gateway `web/`) | Login, akun, hash password, kuota, izin, panel admin. Disimpan di `users.json` pada volume `/data` |
+| **PC** (agent `agent/`) | Hanya file. Satu folder storage yang kamu pilih, berisi subfolder per akun |
+
+Gateway memberi tahu agent di setiap permintaan siapa pemanggilnya dan berapa kuota serta izinnya. Agent hanya menegakkan itu. Karena akun ada di server, **login dan panel admin tetap berfungsi walau PC mati**. Yang tidak bisa saat PC mati hanyalah membuka file, serta membuat atau menghapus akun (butuh PC untuk memeriksa kapasitas disk dan mengarsipkan folder).
+
+## Memilih folder storage di PC
+
+Jalankan `agent\setup-agent.bat`. Jendela pilih folder muncul (atau ketik path sendiri), lalu `agent.env` dibuat otomatis dengan `AGENT_TOKEN` acak. Folder bisa di drive mana saja, misalnya `D:\AIT-Drive`. Jalankan setup lagi kapan saja untuk memindahkan lokasi: salin isi folder lama ke yang baru dulu, lalu pilih folder baru.
+
+Tips: pakai folder khusus yang hanya berisi data AIT Drive, jangan `C:\`, folder Users, atau folder sistem.
 
 ## Peran
 
@@ -10,7 +25,7 @@ Mulai versi 2, AIT Drive mendukung banyak akun **tanpa pendaftaran terbuka**. Ak
 | **Admin** | Dibuat owner di panel | Opsional (kosong = tanpa batas) | Semua | Hanya akun pengguna biasa |
 | **Pengguna** | Dibuat owner atau admin | Wajib, minimal 1 MB | Diatur per akun | Tidak |
 
-Owner tidak disimpan di database dan passwordnya hanya bisa diganti lewat environment variable (lalu redeploy). Ini sengaja: kalau database akun rusak atau hilang, kamu tetap bisa masuk dan memperbaikinya.
+Owner tidak disimpan di database dan passwordnya hanya bisa diganti lewat environment variable (lalu redeploy). Ini sengaja: kalau database akun hilang, kamu tetap bisa masuk dan memperbaikinya. Nilai `ADMIN_USER` dan `ADMIN_PASSWORD` bebas kamu tentukan di Coolify dan tidak perlu sama dengan apa pun di PC.
 
 ## Panel admin
 
@@ -23,7 +38,7 @@ Masuk sebagai owner atau admin, lalu buka **Admin** di sidebar (alamat `#admin`)
 
 Aturan username: 3 sampai 32 karakter, huruf kecil, angka, titik, minus, garis bawah, diawali dan diakhiri huruf atau angka. Nama yang dicadangkan Windows (`con`, `nul`, dan sejenisnya) ditolak. Login tidak peka huruf besar/kecil. Username tidak boleh sama dengan `ADMIN_USER`.
 
-Password minimal 8 karakter. Password tersimpan sebagai hash scrypt di PC, tidak pernah dalam bentuk asli, dan tidak bisa dilihat lagi setelah dibuat.
+Password minimal 8 karakter. Password tersimpan sebagai hash scrypt di server, tidak pernah dalam bentuk asli, dan tidak bisa dilihat lagi setelah dibuat.
 
 ## Kuota ("booking disk")
 
@@ -36,9 +51,9 @@ Kuota adalah **batas maksimal logis**, bukan ruang yang dikunci di disk. Folder 
 
 ### Alokasi agar tidak oversubscribe
 
-Panel menghitung `kapasitas = ruang kosong disk + pemakaian semua akun non-owner`. Jumlah semua kuota tidak boleh melebihi kapasitas itu, sehingga "booking" tidak bisa lebih besar dari disk yang nyata. Bila tidak ingin dibatasi (misalnya thin provisioning), set `ALLOW_OVERBOOK=true` di `agent/agent.env`.
+Panel menghitung `kapasitas = ruang kosong disk + pemakaian semua akun non-owner`. Jumlah semua kuota tidak boleh melebihi kapasitas itu, sehingga "booking" tidak bisa lebih besar dari disk yang nyata. Bila tidak ingin dibatasi (thin provisioning), set `ALLOW_OVERBOOK=true` di **environment web (Coolify)**.
 
-Catatan: karena kuota bukan reservasi fisik, file milik owner atau program lain di disk yang sama tetap bisa mengurangi ruang kosong. Sisihkan ruang cadangan.
+Karena kuota bukan reservasi fisik, file lain di disk yang sama tetap bisa mengurangi ruang kosong. Sisihkan ruang cadangan.
 
 ## Izin
 
@@ -53,9 +68,11 @@ Melihat, mencari, dan mengunduh file sendiri selalu boleh. Akun tanpa izin apa p
 
 ## Sesi dan link berbagi
 
-Setiap akun punya nomor versi token (`tv`). Mengganti password, menonaktifkan akun, atau menghapus akun menaikkan nomor itu, sehingga **semua sesi dan link berbagi akun tersebut langsung tidak berlaku**. Mengaktifkan kembali akun tidak menghidupkan sesi lama; pengguna harus login ulang. Link berbagi dibuat atas nama akunnya dan hanya bisa mengunduh dari folder akun itu.
+Setiap akun punya nomor versi token (`tv`). Mengganti password, menonaktifkan akun, atau menghapus akun menaikkan nomor itu, sehingga **semua sesi dan link berbagi akun tersebut langsung tidak berlaku**. Mengaktifkan kembali akun tidak menghidupkan sesi lama; pengguna harus login ulang. Link berbagi dibuat atas nama akunnya, hanya bisa mengunduh dari folder akun itu, dan mati bila izin `share` dicabut.
 
-## Tata letak data di PC
+## Tata letak data
+
+Di PC (folder yang kamu pilih, `STORAGE_ROOT`):
 
 ```
 STORAGE_ROOT/
@@ -64,21 +81,27 @@ STORAGE_ROOT/
 │   ├── alice/             # drive akun alice (+ .trash)
 │   └── ...
 └── .ait/
-    ├── users.json         # akun, hash password, kuota, izin
     └── archive/           # folder akun yang dihapus
 ```
 
-`.ait/` jangan dihapus dan harus ikut dicadangkan bersama `users/`.
+Di server Coolify (volume `/data`):
 
-## Migrasi dari versi 1
+```
+/data/
+└── users.json             # akun, hash password, kuota, izin
+```
 
-Saat agent versi 2 pertama kali berjalan pada folder penyimpanan lama (tidak ada `.ait/` dan ada isi lain), seluruh isi, termasuk `.trash`, otomatis dipindahkan ke `users/_owner`. Tidak ada file yang disalin ulang atau diubah isinya. Setelah itu akun owner melihat file yang sama seperti sebelumnya.
+**Volume `/data` wajib dipasang sebagai Persistent Storage di Coolify.** Tanpa itu, akun hilang setiap redeploy (owner tetap bisa login). Cadangkan volume itu dan folder storage di PC.
+
+Kalau `users.json` hilang tetapi folder di PC masih ada, buat ulang akun dengan username yang sama dan akun itu langsung melihat datanya lagi.
+
+## Migrasi
+
+- **Dari v1 (satu drive bersama)**: saat agent baru pertama kali berjalan pada folder penyimpanan lama (belum ada `.ait/` dan ada isi lain), seluruh isi, termasuk `.trash`, otomatis dipindahkan ke `users/_owner`. Tidak ada file yang disalin ulang atau diubah.
+- **Dari v2 (akun disimpan di PC)**: versi ini tidak lagi membaca `.ait/users.json` di PC. Karena versi itu belum pernah dipakai di produksi, tidak ada migrasi otomatis. Buat ulang akunnya di panel admin; folder per akun di `users/<id>` tetap dipakai.
 
 ## Memperbarui deployment yang sudah ada
 
-1. **PC**: ambil kode terbaru, hentikan agent lama, jalankan lagi `agent\start-agent.bat`. Log menampilkan `Migrated N item(s)...` bila migrasi terjadi. Tidak ada variabel baru yang wajib. `ALLOW_OVERBOOK` opsional.
-2. **Coolify**: push ke GitHub lalu Deploy ulang. Variabel web tidak berubah (`ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET`, `AGENT_URL`, `AGENT_TOKEN`).
-3. Urutan aman: perbarui agent dulu, baru web. Web versi 2 memerlukan agent versi 2.
-4. Setelah login sebagai owner, buka **Admin** untuk membuat akun.
-
-Untuk rollback, kembalikan kode kedua komponen ke versi 1. Struktur `users/_owner` perlu dipindahkan kembali ke akar folder penyimpanan secara manual.
+1. **PC**: ambil kode terbaru, hentikan agent lama, jalankan `agent\start-agent.bat` (atau `agent\setup-agent.bat` bila ingin mengganti folder).
+2. **Coolify**: tambah Persistent Storage ke `/data`, push ke GitHub, lalu Redeploy. Variabel baru yang opsional: `DATA_DIR`, `ALLOW_OVERBOOK`.
+3. Perbarui agent dan web bersamaan: web baru memakai endpoint `/sys/*` yang hanya ada di agent baru.
