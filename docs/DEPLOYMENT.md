@@ -1,189 +1,101 @@
-# Panduan deploy
+﻿# Deployment: Coolify Gateway + Storage Agent
 
-Dari nol sampai AIT Drive bisa dibuka lewat domain kamu. Urutannya: **agent di PC → tunnel → GitHub → Coolify → verifikasi**.
+AIT Drive terdiri dari dua repository yang dideploy terpisah:
 
-## 0. Persiapan
+- **Web Gateway:** repository `progstay17/AIT-Drive`, dideploy ke Coolify.
+- **Storage Agent:** repository `progstay17/AIT-Drive-Agent`, di-install pada PC yang menyimpan file.
+- **Tunnel:** Caddy Panel di VPS, menghubungkan hostname HTTPS Agent ke `127.0.0.1:4001` di PC melalui SSH reverse tunnel.
 
-- PC dengan Node.js 20+ (cek: `node -v`).
-- Domain di Cloudflare (untuk Cloudflare Tunnel). Alternatif tanpa domain: Tailscale (lihat 2B).
-- Server Coolify yang sudah jalan, dan akun GitHub.
+## 1. Pasang Storage Agent pada PC
 
-## 1. Agent di PC
+Ikuti panduan instalasi di [AIT-Drive-Agent README](https://github.com/progstay17/AIT-Drive-Agent). Ringkas:
 
-> Cara cepat: jalankan `agent\setup-agent.bat`. Jendela **pilih folder** muncul untuk menentukan di mana file disimpan, lalu `agent.env` dibuat otomatis dengan `AGENT_TOKEN` acak dan ditampilkan untuk disalin ke Coolify. Langkah manual di bawah memberi hasil yang sama.
-
-```bat
-cd C:\cloud-drive
-npm run install:all
-copy agent\agent.env.example agent\agent.env
+```powershell
+git clone https://github.com/progstay17/AIT-Drive-Agent.git C:\AIT-Drive-Agent
+cd C:\AIT-Drive-Agent
+npm ci
+.\setup-agent.bat
+.\start-agent.bat
 ```
 
-Edit `agent\agent.env`:
+Pilih folder `STORAGE_ROOT` yang benar. Jika memindahkan instalasi lama, pertahankan folder storage dan token yang sedang digunakan. Jangan letakkan data di folder source repo.
 
-```
-STORAGE_ROOT=C:\cloud-drive\storage
-AGENT_HOST=127.0.0.1
-AGENT_PORT=4001
-AGENT_TOKEN=<hasil perintah di bawah>
-```
+Uji lokal:
 
-Buat token acak (simpan, nanti dipakai juga di Coolify):
-
-```bat
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```powershell
+Invoke-RestMethod http://127.0.0.1:4001/health
 ```
 
-Jalankan dengan `agent\start-agent.bat`. Pesan sukses: `Agent listening on http://127.0.0.1:4001`.
+Harus mengembalikan `{ ok: true }`.
 
-Cek cepat (harus `{"ok":true}`): `curl http://127.0.0.1:4001/health`
+## 2. Siapkan tunnel Caddy Panel
 
-### Jalan otomatis saat Windows start
+Deployment AIT saat ini menggunakan Caddy Panel SSH reverse tunnel:
 
-Pakai Task Scheduler supaya agent hidup walau tidak ada yang login ke jendela:
+1. Di Caddy Panel, buat client SSH tunnel dari storage PC.
+2. VPS listener harus `127.0.0.1:8081`; tujuan di PC `127.0.0.1:4001`.
+3. Public key SSH dipasang pada akun VPS dan dibatasi ke listener loopback port `8081`.
+4. Di PC, salin `run-tunnel.ps1.example` menjadi `run-tunnel.ps1`, isi VPS host/user, lalu tes SSH secara manual.
+5. Di Caddy Panel, buat site HTTPS Agent dan set upstream `127.0.0.1:8081`.
+6. Verifikasi `https://<hostname-agent>/health` mengembalikan `{ ok: true }`.
+7. Uji endpoint terlindungi tanpa token, misalnya `/list`; hasil harus 401.
 
-1. Buka **Task Scheduler** > Create Task.
-2. General: beri nama `AIT Drive Agent`, centang *Run whether user is logged on or not*.
-3. Triggers: *At startup*.
-4. Actions: *Start a program* > Program: `C:\cloud-drive\agent\start-agent.bat`.
-5. Conditions: hilangkan centang *Start the task only if the computer is on AC power* bila PC laptop.
+Jangan membuka port `4001` ke internet. Detail dan troubleshooting tunnel ada di [repo Agent](https://github.com/progstay17/AIT-Drive-Agent/tree/main/docs).
 
-Atur juga Windows agar tidak tidur saat dicolok listrik (Settings > System > Power).
+## 3. Deploy Web Gateway ke Coolify
 
-> `start-agent.bat` membaca `agent.env` baris per baris. Jangan beri tanda kutip pada nilainya.
+1. Di Coolify, buat resource dari Git repository `progstay17/AIT-Drive`.
+2. Build Pack: **Dockerfile**.
+3. Base Directory: `/web`.
+4. Exposed Port: `3000`.
+5. Tambahkan Persistent Storage dengan destination `/data`.
+6. Isi environment variables:
 
-## 2. Tunnel dari server ke PC
-
-Tunnel membuat alamat publik HTTPS yang meneruskan ke `http://127.0.0.1:4001` di PC.
-
-### 2A. Cloudflare Tunnel (disarankan)
-
-```bat
-winget install --id Cloudflare.cloudflared
-cloudflared tunnel login
-cloudflared tunnel create ait-drive
-cloudflared tunnel route dns ait-drive pc-agent.domainkamu.com
-```
-
-Buat `C:\Users\<nama-kamu>\.cloudflared\config.yml`:
-
-```yaml
-tunnel: ait-drive
-credentials-file: C:\Users\<nama-kamu>\.cloudflared\<ID-TUNNEL>.json
-ingress:
-  - hostname: pc-agent.domainkamu.com
-    service: http://127.0.0.1:4001
-  - service: http_status:404
-```
-
-Jalankan sebagai layanan Windows (jalan otomatis): `cloudflared service install`.
-
-Uji dari luar (harus 401, artinya sampai ke agent tetapi ditolak karena tanpa token): `curl -i https://pc-agent.domainkamu.com/list`
-
-> **Batas ukuran**: Cloudflare plan gratis membatasi satu permintaan sekitar 100 MB. Unggahan lebih besar akan gagal. Untuk file besar pakai 2B.
-
-### 2B. Tailscale (tanpa batas ukuran, tanpa domain)
-
-1. Pasang Tailscale di PC **dan** di server Coolify, login ke tailnet yang sama.
-2. Di `agent.env` ubah `AGENT_HOST=0.0.0.0` (atau IP Tailscale PC). Agent tetap dilindungi token, dan firewall Windows tetap menjaga akses dari luar tailnet.
-3. Di Coolify nanti: `AGENT_URL=http://<ip-tailscale-pc>:4001`.
-
-## 3. Push ke GitHub
-
-Git belum tentu terpasang: `winget install --id Git.Git`.
-
-```bat
-cd C:\cloud-drive
-git init
-git add .
-git status
-```
-
-**Periksa `git status` sebelum commit.** File berikut tidak boleh muncul: `agent/agent.env`, `web/local.env`, `web/coolify-secrets.txt`, `node_modules/`, `storage/`. (Semuanya sudah ada di `.gitignore`.)
-
-```bat
-git commit -m "AIT Drive v1.0.0"
-git branch -M main
-git remote add origin https://github.com/<akun>/ait-drive.git
-git push -u origin main
-```
-
-Repo **private** disarankan.
-
-## 4. Deploy di Coolify
-
-1. **New Resource** > pilih repo GitHub kamu (Private Repository bila repo private).
-2. **Build Pack**: `Dockerfile`.
-3. **Base Directory**: `/web`  (penting, Dockerfile ada di dalam `web/`).
-4. **Port Exposes**: `3000`.
-5. **Environment Variables**:
-
-| Variabel | Nilai |
+| Variable | Nilai |
 |---|---|
-| `ADMIN_USER` | username login |
-| `ADMIN_PASSWORD` | password kuat (panjang) |
-| `SESSION_SECRET` | 64 karakter hex acak (jangan sama dengan token agent) |
-| `AGENT_URL` | `https://pc-agent.domainkamu.com` (tanpa `/` di akhir) |
-| `AGENT_TOKEN` | **sama persis** dengan di `agent\agent.env` |
+| `ADMIN_USER` | Username owner |
+| `ADMIN_PASSWORD` | Password kuat |
+| `SESSION_SECRET` | Random secret minimal 32 karakter |
+| `AGENT_URL` | `https://<hostname-agent>` tanpa slash akhir |
+| `AGENT_TOKEN` | Nilai yang sama persis dengan `AGENT_TOKEN` di Agent `agent.env` |
 | `COOKIE_SECURE` | `true` |
+| `DATA_DIR` | `/data` |
+| `ALLOW_OVERBOOK` | `false` (opsional) |
 
-6. **Domain**: mis. `https://drive.domainkamu.com`. Coolify menerbitkan sertifikat HTTPS otomatis.
-7. **Deploy**.
+7. Pasang domain web dan aktifkan HTTPS.
+8. Deploy.
 
-> Coolify menjalankan healthcheck dari `Dockerfile` ke `/auth/me`. Kalau deploy "unhealthy", lihat log container: biasanya ada variabel yang kosong (`Missing env var: ...`).
+## 4. Verifikasi end-to-end
 
-Soal batas unggah di reverse proxy: Traefik (bawaan Coolify) tidak membatasi ukuran body secara default.
+1. Buka domain web; layar login muncul.
+2. Login sebagai owner.
+3. Status storage/PC menunjukkan online.
+4. Upload file kecil, download kembali, lalu hapus (soft-delete).
+5. Cek endpoint Agent tanpa token harus 401 untuk route selain `/health`.
+6. Matikan tunnel sementara: gateway harus melaporkan storage offline, bukan menampilkan error mentah.
 
-## 5. Verifikasi
+## 5. Update terpisah
 
-1. Buka `https://drive.domainkamu.com`: layar login muncul.
-2. Masuk. Sidebar kiri bawah harus menunjukkan **PC online**.
-3. Unggah file kecil, unduh lagi, lalu hapus.
-4. Matikan agent sebentar: UI harus menampilkan "Koneksi terputus" dan "PC offline".
-5. Kalau muncul "Token agent tidak cocok", samakan `AGENT_TOKEN` (lihat TROUBLESHOOTING).
+- Perubahan UI/gateway: push repository AIT-Drive; Coolify redeploy otomatis bila Auto Deploy aktif.
+- Perubahan Agent: pull repository AIT-Drive-Agent pada PC, jalankan `npm ci` bila dependencies berubah, restart Agent.
+- Perubahan tunnel: dikelola dari Caddy Panel/Task Scheduler, tidak ikut deployment Coolify.
 
-## 6. Update versi
+## 6. Backup dan pemulihan
 
-```bat
-git add . && git commit -m "perubahan" && git push
-```
+Backup dua lokasi secara terpisah:
 
-Coolify otomatis deploy ulang bila *Auto Deploy* aktif (atau tekan Deploy). Perubahan di `agent/` tidak ikut ke Coolify: salin/pull ke PC lalu restart agent.
+- `STORAGE_ROOT` pada PC: seluruh file pengguna, trash, dan archive.
+- Persistent volume `/data` di Coolify: akun, hash password, kuota, dan permissions.
 
-Setelah update UI, hard refresh browser (`Ctrl+F5`) bila tampilan lama masih muncul.
+Uji restore berkala. GitHub repository berisi source code dan dokumentasi, bukan backup file pengguna atau secrets.
 
-## 7. Rotasi rahasia
+## 7. Rotasi secret
 
-| Yang diganti | Dampak | Langkah |
-|---|---|---|
-| `ADMIN_PASSWORD` | sesi lama tetap berlaku sampai habis | ubah di Coolify, redeploy. Ganti juga `SESSION_SECRET` bila ingin memaksa semua keluar |
-| `SESSION_SECRET` | semua sesi dan **semua link berbagi** tidak berlaku | ubah di Coolify, redeploy |
-| `AGENT_TOKEN` | gateway tidak bisa bicara ke agent sampai keduanya sama | ubah di `agent.env`, restart agent, ubah di Coolify, redeploy |
-
-## 8. Backup
-
-Seluruh data kamu ada di folder `STORAGE_ROOT` di PC. Backup folder itu (termasuk `.trash`) ke disk lain atau cloud. Repo GitHub hanya berisi kode, bukan data.
-
-## 9. Mencabut/menghapus
-
-- Hentikan akses publik: hentikan resource di Coolify atau hapus rute tunnel (`cloudflared tunnel route dns` bisa dihapus dari dashboard Cloudflare).
-- Hentikan agent: tutup jendela `start-agent.bat` atau nonaktifkan task di Task Scheduler.
+1. Generate token Agent baru pada PC.
+2. Ganti `AGENT_TOKEN` di Agent `agent.env` dan environment Coolify dengan nilai identik.
+3. Restart Agent dan redeploy gateway.
+4. Verifikasi health dan operasi file. Jangan commit token lama/baru.
 
 ---
 
 Dibuat oleh Fadhil Ghifarion 法迪 for AIT.
-
-## Pengaturan wajib di Coolify
-
-1. **Build Pack: Dockerfile**, Base Directory `/` (atau `/web`), Port `3000`. Jangan Railpack/Nixpacks.
-2. **Persistent Storage**: tambahkan volume dengan path tujuan `/data`. Di situlah akun, kuota, dan izin disimpan. Tanpa ini akun hilang setiap redeploy.
-3. **Environment Variables**: `ADMIN_USER`, `ADMIN_PASSWORD` (bebas kamu tentukan), `SESSION_SECRET`, `AGENT_URL`, `AGENT_TOKEN` (satu-satunya yang harus sama dengan PC), `COOKIE_SECURE=true`. Opsional: `DATA_DIR` (default `/data`), `ALLOW_OVERBOOK`.
-4. Redeploy setiap kali variabel diubah.
-
-## Memperbarui dari versi sebelumnya
-
-1. Di PC: tarik kode terbaru, hentikan agent lama, jalankan `agent\start-agent.bat`. Isi folder penyimpanan v1 otomatis dipindah ke `users/_owner` (lihat baris `Migrated ...` di log).
-2. Di Coolify: tambah Persistent Storage ke `/data`, push ke GitHub, Redeploy.
-3. Perbarui agent dan web bersamaan.
-4. Login sebagai owner dan buka **Admin** untuk membuat akun.
-
-Rincian: [MULTI-USER.md](MULTI-USER.md).

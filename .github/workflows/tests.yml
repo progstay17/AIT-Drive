@@ -1,0 +1,28 @@
+name: Tests
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout AIT Drive gateway
+        uses: actions/checkout@v4
+      - name: Checkout Storage Agent
+        uses: actions/checkout@v4
+        with:
+          repository: progstay17/AIT-Drive-Agent
+          path: AIT-Drive-Agent
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix web ci
+          npm --prefix AIT-Drive-Agent ci
+      - name: Run API and UI tests
+        env:
+          AIT_AGENT_DIR: ${{ github.workspace }}/AIT-Drive-Agent
+        run: npm test

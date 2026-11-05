@@ -9,6 +9,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 const ROOT = path.resolve(__dirname, '..');
+const AGENT_ROOT = process.env.AIT_AGENT_DIR || path.resolve(ROOT, '..', 'AIT-Drive-Agent');
+if (!fs.existsSync(path.join(AGENT_ROOT, 'server.js'))) {
+  throw new Error('AIT Drive Agent source not found. Clone progstay17/AIT-Drive-Agent beside this repo or set AIT_AGENT_DIR.');
+}
 const rand = (n) => crypto.randomBytes(n).toString('hex');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -55,7 +59,7 @@ async function startStack(opts = {}) {
 
   const agentPort = await freePort();
   const agentUrl = `http://127.0.0.1:${agentPort}`;
-  procs.push(launch(path.join(ROOT, 'agent', 'server.js'), {
+  procs.push(launch(path.join(AGENT_ROOT, 'server.js'), {
     AGENT_TOKEN: token, STORAGE_ROOT: storage, AGENT_HOST: '127.0.0.1', AGENT_PORT: String(agentPort), ...(opts.agentEnv || {}),
   }, logs));
   await waitFor(async () => (await fetch(agentUrl + '/health')).ok, 8000, 'agent');

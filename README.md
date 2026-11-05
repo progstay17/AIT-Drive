@@ -1,212 +1,160 @@
-# AIT Drive
+﻿# AIT Drive
 
-Cloud drive pribadi dengan **file yang tetap tersimpan di PC kamu sendiri**, dibuka lewat web yang bisa kamu deploy di Coolify.
+Cloud drive pribadi dengan antarmuka web yang di-host di Coolify, sementara file tetap berada di PC/storage host milik sendiri.
 
-> Dibuat oleh **Fadhil Ghifarion 法迪 for AIT**
+**Repository ini hanya berisi Web Gateway dan UI. Storage Agent dikelola terpisah di [progstay17/AIT-Drive-Agent](https://github.com/progstay17/AIT-Drive-Agent).** Agent dipasang langsung pada PC yang menyimpan file; source Agent tidak disalin ke Docker image Coolify maupun repository ini.
 
-- Tanpa langganan storage: kapasitas = disk PC kamu.
-- Tanpa port-forward: PC terhubung lewat tunnel (Cloudflare Tunnel atau Tailscale).
-- Tanpa framework dan tanpa build step di sisi UI (HTML + CSS + JavaScript biasa).
-- Dua komponen kecil dengan dependensi minimal (`express`, `busboy`).
-- Banyak akun tanpa signup: **panel admin** untuk membuat akun, menentukan kapasitas disk per akun (kuota), dan mengatur izin.
+## Komponen
 
-## Daftar isi
+| Komponen | Repository / lokasi | Tanggung jawab |
+|---|---|---|
+| Web Gateway + UI | Repo ini, folder `web/`; deploy ke Coolify | Login, sesi, akun, kuota, izin, admin panel, share link, UI, proxy API |
+| Storage Agent | [AIT-Drive-Agent](https://github.com/progstay17/AIT-Drive-Agent); install di storage PC | Operasi file lokal di dalam `STORAGE_ROOT`, kuota dan izin yang diteruskan gateway |
+| Tunnel + reverse proxy | Caddy Panel di VPS | HTTPS publik ke Agent tanpa membuka port masuk pada storage PC |
 
-1. [Fitur](#fitur)
-2. [Cara kerja](#cara-kerja)
-3. [Prasyarat](#prasyarat)
-4. [Mulai cepat (lokal)](#mulai-cepat-lokal)
-5. [Deploy ke internet](#deploy-ke-internet)
-6. [Konfigurasi](#konfigurasi)
-7. [Memakai UI](#memakai-ui)
-8. [Struktur proyek](#struktur-proyek)
-9. [Tes](#tes)
-10. [Keamanan](#keamanan)
-11. [Batasan dan rencana](#batasan-dan-rencana)
-12. [Dokumentasi lanjutan](#dokumentasi-lanjutan)
-13. [Kredit](#kredit)
+```text
+Browser --HTTPS--> Coolify / Web Gateway
+                         |
+                         | HTTPS + AGENT_TOKEN
+                         v
+                  Public Agent hostname
+                         |
+                    Caddy on VPS
+                         |
+                  VPS 127.0.0.1:8081
+                         |
+                  SSH reverse tunnel
+                         |
+              Storage PC 127.0.0.1:4001
+                         |
+                    STORAGE_ROOT
+```
 
-## Fitur
+Token Agent hanya disimpan pada `agent.env` di storage PC dan environment variables gateway di Coolify. Browser tidak pernah menerima token tersebut.
 
-| Area | Yang tersedia |
+## Fitur web
+
+- Banyak akun tanpa signup terbuka; akun dibuat dari panel admin.
+- Kuota disk per akun dan izin upload, modify, delete, share.
+- File browser dengan grid/list, breadcrumb, pencarian, multi-select, drag-and-drop upload, progress, preview gambar/video/audio/PDF/teks.
+- Rename, move, soft-delete, trash, signed share links dengan kedaluwarsa.
+- Tema terang/gelap, layout responsif, sesi HttpOnly, CSRF guard, rate limit login.
+- Status online/offline Agent dan pesan kesalahan koneksi.
+
+## Persyaratan
+
+- Node.js 20+ untuk pengembangan/lokal.
+- Coolify dengan Dockerfile build pack untuk deployment web.
+- Repository publik/privat GitHub yang terhubung ke Coolify.
+- Storage PC dengan Node.js 20+ dan Agent dari repo terpisah.
+- Tunnel HTTPS dari Coolify ke Agent, misalnya Caddy Panel SSH reverse tunnel.
+
+## Menjalankan web lokal
+
+Clone kedua repository berdampingan:
+
+```text
+workspace/
+├── AIT-Drive/          # repo ini
+└── AIT-Drive-Agent/    # repo Agent terpisah
+```
+
+Pada Windows, contoh folder: `C:\AIT-Drive` dan `C:\AIT-Drive-Agent`. Konfigurasikan dan jalankan Agent dari repository Agent terlebih dahulu. Lalu:
+
+```powershell
+cd C:\AIT-Drive
+npm install
+npm --prefix web install
+```
+
+Buat `web/local.env` (jangan commit):
+
+```dotenv
+ADMIN_USER=owner
+ADMIN_PASSWORD=use-a-long-unique-password
+SESSION_SECRET=generate-a-random-secret-at-least-32-characters
+AGENT_URL=http://127.0.0.1:4001
+COOKIE_SECURE=false
+```
+
+`web/start-web-local.bat` membaca `AGENT_TOKEN` dari `C:\AIT-Drive-Agent\agent.env`. Sesuaikan path pada script bila repositori disimpan di lokasi lain. Jalankan `web/start-web-local.bat`, lalu buka `http://localhost:3000`.
+
+## Deploy ke Coolify
+
+1. Hubungkan repository `progstay17/AIT-Drive` ke Coolify.
+2. Build Pack: **Dockerfile**.
+3. Base Directory: `/web` (Dockerfile berada di folder `web/`).
+4. Exposed Port: `3000`.
+5. Pasang Persistent Storage ke `/data` untuk data akun, kuota, dan izin.
+6. Isi environment variables:
+
+| Variable | Nilai |
 |---|---|
-| Akun | Owner dari environment variable, admin dan pengguna dibuat lewat panel admin. Folder terpisah per akun, kuota disk per akun, izin (unggah, ubah, hapus, bagikan), nonaktifkan, reset password, arsip saat akun dihapus |
-| File | Lihat, unggah (banyak file sekaligus, drag and drop, progress per file, tombol coba lagi), unduh, ganti nama, pindah, hapus |
-| Folder | Buat folder, navigasi dengan breadcrumb, pencarian ke seluruh drive |
-| Pratinjau | Gambar, video, audio, PDF, teks (sampai 1 MB). Tipe lain menampilkan info dan tombol unduh |
-| Berbagi | Link berbagi bertanda tangan dan kedaluwarsa (1 sampai 30 hari), bisa dibuka tanpa login |
-| Keamanan | Login dengan rate limit, cookie HttpOnly, perlindungan CSRF, token agent, anti path traversal, hapus lembut ke `.trash`, kuota ditegakkan di agent (cek awal dan saat streaming) |
-| Tampilan | Grid atau daftar, tema terang/gelap/ikut sistem, responsif (sidebar jadi drawer di HP), dukungan keyboard |
-| Operasional | Indikator "PC online/offline", pesan jelas saat PC mati atau token tidak cocok |
+| `ADMIN_USER` | Username owner |
+| `ADMIN_PASSWORD` | Password owner yang kuat |
+| `SESSION_SECRET` | Random secret unik, minimal 32 karakter |
+| `AGENT_URL` | URL HTTPS publik Agent, tanpa slash di akhir |
+| `AGENT_TOKEN` | Harus sama persis dengan token lokal Agent |
+| `COOKIE_SECURE` | `true` untuk HTTPS |
+| `DATA_DIR` | `/data` (default produksi) |
+| `ALLOW_OVERBOOK` | Opsional, default `false` |
 
-## Cara kerja
+7. Pasang domain web, aktifkan HTTPS, lalu deploy.
 
-```
-Browser ──HTTPS──> Coolify: web/ (login, UI, proxy) ──tunnel──> PC kamu: agent/ ──> folder penyimpanan
-```
+Panduan lengkap: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Panduan Agent dan tunnel ada di [repo Agent](https://github.com/progstay17/AIT-Drive-Agent).
 
-- **`agent/`** berjalan di PC dan **hanya mengurus file**: membuka satu folder (`STORAGE_ROOT`, yang kamu pilih lewat `agent\setup-agent.bat`) lewat API HTTP yang dilindungi token. Kuota dan izin dikirim gateway di setiap permintaan.
-- **`web/`** berjalan di server (Coolify/Docker) dan menjadi **server utama**: login, akun, kuota, izin, panel admin, dan UI. Data akun disimpan di volume `/data`. Meneruskan permintaan file ke agent dengan token rahasia yang tidak pernah dikirim ke browser.
-- **Tunnel** menghubungkan server ke agent tanpa membuka port di router.
-
-Penjelasan rinci: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Prasyarat
-
-- Windows, macOS, atau Linux untuk PC yang menyimpan file (panduan di sini memakai Windows).
-- [Node.js](https://nodejs.org) versi 20 atau lebih baru di PC tersebut.
-- Untuk produksi: server Coolify, akun GitHub, dan (disarankan) akun Cloudflare dengan sebuah domain.
-
-## Mulai cepat (lokal)
-
-Cara ini menjalankan semuanya di satu PC untuk dicoba.
-
-```bash
-# 1. pasang dependensi semua komponen
-npm run install:all
-
-# 2. buat konfigurasi agent
-agent\setup-agent.bat                           # Windows: pilih folder storage lewat jendela, agent.env dibuat otomatis
-# (manual: salin agent\agent.env.example menjadi agent\agent.env lalu isi AGENT_TOKEN acak minimal 24 karakter)
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-
-# 3. jalankan agent (jendela terpisah)
-agent\start-agent.bat
-
-# 4. buat web\local.env berisi:
-#    ADMIN_USER=nama-kamu
-#    ADMIN_PASSWORD=password-kuat
-#    SESSION_SECRET=<hex acak 64 karakter>
-# lalu jalankan web
-web\start-web-local.bat
-```
-
-Buka **http://localhost:3000** (bukan port 4001, itu agent dan memang hanya menjawab "unauthorized" tanpa token), lalu masuk dengan username dan password dari `web\local.env`.
-
-Di Linux/macOS, jalankan manual dengan environment variable, contoh:
-
-```bash
-AGENT_TOKEN=... STORAGE_ROOT=$HOME/ait-drive npm run start:agent
-ADMIN_USER=han ADMIN_PASSWORD=... SESSION_SECRET=... AGENT_URL=http://127.0.0.1:4001 \
-AGENT_TOKEN=... COOKIE_SECURE=false npm run start:web
-```
-
-## Deploy ke internet
-
-Ringkasannya:
-
-1. Agent jalan otomatis di PC (Task Scheduler) dan PC tidak tidur.
-2. Pasang tunnel ke `http://127.0.0.1:4001`, misalnya `https://pc-agent.domainkamu.com`.
-3. Push repo ke GitHub (private boleh).
-4. Di Coolify buat resource dari repo itu: Build Pack **Dockerfile**, Base Directory `/web`, port `3000`, isi environment variable.
-5. Beri domain, deploy, buka, login, cek "PC online".
-
-Langkah lengkap dengan perintah: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
-
-## Konfigurasi
-
-### Agent (`agent/agent.env`)
+## Konfigurasi gateway
 
 | Variabel | Default | Keterangan |
 |---|---|---|
-| `AGENT_TOKEN` | wajib | Rahasia bersama dengan web. Minimal 24 karakter |
-| `STORAGE_ROOT` | `../storage` | Folder yang menjadi drive |
-| `AGENT_HOST` | `127.0.0.1` | Alamat bind. Biarkan lokal kalau memakai tunnel di PC yang sama |
-| `AGENT_PORT` | `4001` | Port agent |
+| `ADMIN_USER` | wajib | Username owner |
+| `ADMIN_PASSWORD` | wajib | Password owner |
+| `SESSION_SECRET` | wajib | Secret sesi dan signed share links |
+| `AGENT_URL` | wajib | URL tunnel HTTPS ke Agent |
+| `AGENT_TOKEN` | wajib | Shared secret yang sama dengan Agent |
+| `COOKIE_SECURE` | `true` | `false` hanya untuk uji lokal HTTP |
+| `SESSION_HOURS` | `168` | Durasi sesi dalam jam |
+| `PORT` | `3000` | Port web server |
+| `DATA_DIR` | `web/data` (`/data` di Docker) | Data akun; pasang persistent volume di Coolify |
+| `ALLOW_OVERBOOK` | `false` | Izinkan total kuota melebihi kapasitas disk |
 
-### Web (environment variable di Coolify, atau `web/local.env` untuk lokal)
+Template: [`web/.env.example`](web/.env.example). Konfigurasi Agent: [`agent.env.example` pada repo Agent](https://github.com/progstay17/AIT-Drive-Agent/blob/main/agent.env.example).
 
-| Variabel | Default | Keterangan |
-|---|---|---|
-| `ADMIN_USER` | wajib | Username **owner** (akun utama, tanpa kuota, semua izin) |
-| `ADMIN_PASSWORD` | wajib | Password owner. Pakai yang kuat. Hanya bisa diganti lewat variabel ini |
-| `SESSION_SECRET` | wajib | Minimal 32 karakter acak. Menandatangani sesi dan link berbagi |
-| `AGENT_URL` | wajib | URL tunnel ke agent, tanpa garis miring di akhir |
-| `AGENT_TOKEN` | wajib | Harus sama persis dengan di agent |
-| `COOKIE_SECURE` | `true` | Biarkan `true` di HTTPS. Set `false` hanya untuk uji lokal lewat http |
-| `SESSION_HOURS` | `168` | Lama sesi login (jam) |
-| `PORT` | `3000` | Port web |
-| `DATA_DIR` | `web/data` (Docker: `/data`) | Tempat `users.json` (akun, kuota, izin). Di Coolify **wajib** dipasang Persistent Storage ke `/data` |
-| `ALLOW_OVERBOOK` | `false` | `true` mengizinkan total kuota melebihi kapasitas disk (lihat [docs/MULTI-USER.md](docs/MULTI-USER.md)) |
+## Struktur repository
 
-Template ada di `agent/agent.env.example` dan `web/.env.example`.
-
-## Memakai UI
-
-| Aksi | Cara |
-|---|---|
-| Pilih file | Klik. `Ctrl/Cmd+klik` menambah, `Shift+klik` memilih rentang |
-| Buka folder / pratinjau | Klik dua kali (di layar sentuh cukup ketuk) |
-| Menu konteks | Klik kanan, `Shift+F10`, atau tekan lama di HP |
-| Pilih semua | `Ctrl+A` |
-| Hapus pilihan | `Delete` (selalu minta konfirmasi) |
-| Tutup dialog/menu/drawer | `Esc` |
-| Unggah | Tombol Unggah, atau seret file ke jendela |
-| Ganti tema, grid/daftar | Tombol di pojok kanan atas |
-
-Hapus tidak permanen: item dipindah ke `.trash` milik akun itu di PC dan tidak tampil di UI. Ruangnya tetap dihitung ke kuota sampai kamu menekan **Kosongkan sampah** (tombol muncul di sidebar bila ada isi sampah).
-
-Menu yang muncul menyesuaikan izin akun. Owner dan admin punya entri **Admin** di sidebar untuk mengelola akun; semua akun biasa bisa **Ganti password** sendiri. Detail: [docs/MULTI-USER.md](docs/MULTI-USER.md).
-
-## Struktur proyek
-
-```
-ait-drive/
-├── agent/                 # berjalan di PC: API file dengan token
-│   ├── server.js
-│   ├── start-agent.bat
-│   └── agent.env.example
-├── web/                   # di-deploy ke Coolify
-│   ├── server.js          # login, proxy ke agent, share link, header keamanan
-│   ├── Dockerfile
-│   ├── .env.example
-│   ├── start-web-local.bat
-│   └── public/            # UI: index.html, style.css, app.js, admin.js, theme.js
-├── tests/                 # harness terisolasi + tes API + tes UI (jsdom)
-├── docs/                  # dokumentasi lanjutan
-├── package.json           # skrip pembantu (install:all, test, start:*)
+```text
+AIT-Drive/
+├── web/                 # gateway Express, Dockerfile, UI statis
+├── tests/               # gateway + integration tests
+├── docs/                # deployment, API, architecture, security
+├── package.json
 └── README.md
 ```
 
 ## Tes
 
-```bash
-npm run install:all   # sekali saja
-npm test              # semua tes
-npm run test:api      # API, keamanan, multi-akun, kuota, agent storage-saja (158 pemeriksaan)
-npm run test:ui       # tampilan di jsdom termasuk panel admin (58 pemeriksaan)
+Test harness integrasi menjalankan source Agent dari repository terpisah. Clone kedua repo berdampingan seperti struktur di atas, atau set `AIT_AGENT_DIR` ke lokasi checkout Agent.
+
+```powershell
+npm install
+npm --prefix web install
+npm test
 ```
 
-Tes memakai folder sementara, port acak, dan rahasia acak, jadi **tidak menyentuh drive asli atau konfigurasi kamu**. Tes UI memuat `index.html`, `admin.js`, dan `app.js` asli lalu menjalankan login, panel admin (buat, ubah, hapus akun), login sebagai pengguna berkuota, pembatasan izin, navigasi, seleksi, pratinjau, menu konteks, ganti nama, link berbagi, unggah, pencarian, hapus, tema, drawer, dan logout.
+- `npm run test:api`: API, auth, multi-akun, kuota, dan integrasi storage Agent.
+- `npm run test:ui`: UI smoke tests menggunakan jsdom.
 
-## Keamanan
+Test harness memakai port acak, token acak, dan folder storage sementara; tidak menyentuh data produksi.
 
-Ringkas: agent hanya menerima token yang benar, web tidak pernah mengirim token itu ke browser, semua path dipaksa tetap di dalam folder penyimpanan, login dibatasi percobaannya, dan semua respons membawa Content-Security-Policy. Detail, model ancaman, dan daftar periksa pengerasan: **[docs/SECURITY.md](docs/SECURITY.md)**.
+## Keamanan dan data
 
-## Batasan dan rencana
+- Jangan commit `web/local.env`, token Agent, kredensial tunnel, file SSH private key, atau data storage.
+- Jangan bind Agent ke `0.0.0.0` untuk deployment publik. Gunakan tunnel dan HTTPS.
+- Pasang backup terpisah untuk `STORAGE_ROOT` pada PC dan persistent volume `/data` di Coolify.
+- Soft-delete bukan backup; empty trash menghapus file secara permanen.
 
-- **Tanpa pendaftaran (signup) terbuka.** Ini disengaja: pendaftaran terbuka pada drive yang menempel ke PC pribadi berarti orang asing bisa menulis ke disk kamu. Akun hanya dibuat admin.
-- **Kuota adalah batas logis, bukan ruang yang dikunci.** Panel mencegah total kuota melebihi kapasitas disk, tetapi file di luar AIT Drive tetap bisa mengurangi ruang kosong.
-- **Akun disimpan di server (volume `/data` Coolify).** Cadangkan volume itu. File pengguna ada di PC, jadi saat PC mati login dan panel admin tetap jalan tetapi file tidak terbuka.
-- Belum ada 2FA, daftar sesi aktif, atau berbagi antar akun.
-- PC harus menyala dan agent berjalan. Saat PC mati, UI menampilkan "Koneksi terputus".
-- Link berbagi tidak bisa dicabut satu per satu. Mengganti `SESSION_SECRET` mencabut semuanya (dan mengeluarkan semua sesi login).
-- Melalui Cloudflare plan gratis, satu permintaan unggah dibatasi sekitar 100 MB. Pakai Tailscale atau unggah per file kecil untuk berkas besar.
-- Unggah folder utuh belum didukung (unggah file di dalamnya).
-- Tidak ada thumbnail server-side: gambar kecil (sampai 2 MB) dimuat langsung sebagai pratinjau di grid.
+Dokumentasi: [API](docs/API.md), [Architecture](docs/ARCHITECTURE.md), [Security](docs/SECURITY.md), [Deployment](docs/DEPLOYMENT.md), [Multi-user](docs/MULTI-USER.md), [Troubleshooting](docs/TROUBLESHOOTING.md).
 
-## Dokumentasi lanjutan
+## License
 
-| Dokumen | Isi |
-|---|---|
-| [docs/MULTI-USER.md](docs/MULTI-USER.md) | Panel admin, kuota dan booking disk, izin, tata letak data, migrasi dari v1 |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Panduan langkah demi langkah: PC, tunnel, GitHub, Coolify, update, rollback |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Komponen, alur permintaan, keputusan desain |
-| [docs/API.md](docs/API.md) | Referensi endpoint agent dan gateway |
-| [docs/SECURITY.md](docs/SECURITY.md) | Model ancaman, kontrol, pengerasan, rotasi rahasia |
-| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Masalah umum dan solusinya |
-
-## Kredit
-
-Dibuat oleh **Fadhil Ghifarion 法迪 for AIT**.
-Arah visual (palet, tipografi, komponen) dirancang bersama ChatGPT lalu diimplementasikan di proyek ini.
+Source code repository ini dipublikasikan untuk kebutuhan proyek AIT Drive. Belum ada lisensi open-source yang diberikan; hak penggunaan dan distribusi mengikuti ketentuan pemilik repository.

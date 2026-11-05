@@ -69,7 +69,7 @@ curl -b jar.txt -H "X-Requested-With: drive" \
 
 Respons error berbentuk `{"error":"pesan"}`.
 
-## Agent (`agent/`)
+## Storage Agent (repository terpisah)
 
 Hanya untuk gateway. Semua endpoint kecuali `/health` butuh header `Authorization: Bearer <AGENT_TOKEN>` (salah/kosong: 401 `{"error":"unauthorized"}`).
 
@@ -87,7 +87,7 @@ Aturan nama (mkdir/rename/unggah): tidak kosong, bukan `.` atau `..`, maksimal 2
 
 ---
 
-Dibuat oleh Fadhil Ghifarion 法迪 for AIT.
+Referensi Agent lengkap: https://github.com/progstay17/AIT-Drive-Agent/blob/main/docs/API.md
 
 ## Akun, kuota, dan admin (v2)
 
