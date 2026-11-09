@@ -1130,6 +1130,7 @@
       return;
     }
     showApp();
+    ensureTransferUI();
     applyViewIcons();
     applyMe();
     route();
