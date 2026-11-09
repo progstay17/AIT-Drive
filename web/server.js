@@ -396,11 +396,13 @@ admin.post('/nodes', wrap(async (req, res) => {
 admin.get('/overview', wrap(async (req, res) => res.json(overviewFrom(await pcNumbers()))));
 
 admin.get('/users', wrap(async (req, res) => {
-  const pcs = await Promise.all(Object.keys(db.nodes).map((id) => pcNumbers(id)));
+  const nodeIds = Object.keys(db.nodes);
+  const pcs = await Promise.all(nodeIds.map((id) => pcNumbers(id)));
   const usage = Object.assign({}, ...pcs.map((pc) => pc.usage));
   const list = Object.values(db.users).map((u) => publicUser(u, usage));
   list.sort((a, b) => a.id.localeCompare(b.id));
-  res.json({ users: list, online: pcs.some((pc) => pc.online) });
+  // Keep the legacy `online` field tied to primary; per-node status is exposed by /nodes.
+  res.json({ users: list, online: !!pcs[nodeIds.indexOf('primary')]?.online });
 }));
 
 admin.post('/users', wrap(async (req, res) => {
