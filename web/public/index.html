@@ -54,7 +54,9 @@
       <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
       Unggah
     </button>
+    <button class="btn btn-secondary" id="folder-upload-btn" type="button">Unggah folder</button>
     <input type="file" id="file-input" multiple hidden>
+    <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
 
     <nav class="sidebar-nav" aria-label="Drive">
       <div class="eyebrow nav-label">Drive Saya</div>
@@ -83,7 +85,7 @@
       <div class="storage-head"><span>Penyimpanan</span><span id="storage-text">—</span></div>
       <div class="progress-track" style="margin-top:10px"><div class="progress-value" id="storage-fill"></div></div>
       <div class="storage-caption" id="storage-caption">&nbsp;</div>
-      <button class="btn btn-secondary btn-sm" id="trash-btn" type="button" hidden>Kosongkan sampah</button>
+      <button class="btn btn-secondary btn-sm" id="trash-btn" type="button" hidden>Lihat sampah</button>
       <div class="status-line"><span class="status-dot" id="agent-dot"></span><span id="agent-text">PC: memeriksa…</span></div>
     </div>
     <p class="credit sidebar-credit">AIT Drive &middot; Fadhil Ghifarion <span lang="zh">法迪</span> for AIT</p>

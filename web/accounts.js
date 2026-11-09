@@ -37,10 +37,12 @@ function openStore(dataDir) {
     console.error('Di Coolify tambahkan Persistent Storage (volume) yang dipasang ke /data.');
     process.exit(1);
   }
-  let db = { version: 2, users: {} };
+  let db = { version: 3, users: {}, nodes: {} };
   try {
     db = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!db.users || typeof db.users !== 'object') db.users = {};
+    if (!db.nodes || typeof db.nodes !== 'object') db.nodes = {};
+    db.version = Math.max(3, Number(db.version) || 2);
   } catch (e) {
     if (e.code !== 'ENOENT') { console.error(`Tidak bisa membaca ${file}: ${e.message}`); process.exit(1); }
   }

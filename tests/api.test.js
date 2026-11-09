@@ -115,6 +115,8 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     r = await own.get('/api/list?path=Docs');
     let d = await r.json();
     check('list shows 3 files', d.items && d.items.length === 3, d.items && d.items.map((i) => i.name).join(', '));
+    u = await own.upload('nested/deep/inside.txt', 'nested folder upload', 'Docs');
+    check('folder-style multipart path creates nested subfolders', u.status === 200 && fs.readFileSync(path.join(OWN, 'Docs', 'nested', 'deep', 'inside.txt'), 'utf8') === 'nested folder upload', JSON.stringify(u.json));
     r = await own.get('/api/download?path=Docs/hello.txt', { Range: 'bytes=0-4' });
     check('range request returns 206 + "hello"', r.status === 206 && (await r.text()) === 'hello', r.status);
 
@@ -170,6 +172,17 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     r = await own.get('/api/list?path=');
     d = await r.json();
     check('Docs gone from root listing, .trash hidden', !d.items.some((i) => i.name === 'Docs' || i.name === '.trash'), d.items.map((i) => i.name).join(', '));
+    r = await own.get('/api/trash');
+    d = await r.json();
+    const trashedDocs = d.items && d.items.find((item) => item.name === 'Docs');
+    check('Trash lists deleted folder and remembers its original path', !!trashedDocs && trashedDocs.originalPath === 'Docs', JSON.stringify(d.items));
+    r = await own.post('trash/restore', { id: trashedDocs.id });
+    check('restore returns folder to its original path', r.status === 200 && fs.existsSync(path.join(OWN, 'Docs', 'big.bin')), r.status);
+    r = await own.get('/api/download?path=Docs');
+    const zipBytes = Buffer.from(await r.arrayBuffer());
+    check('downloading a folder returns a ZIP archive', r.status === 200 && (r.headers.get('content-disposition') || '').includes('Docs.zip') && zipBytes[0] === 0x50 && zipBytes[1] === 0x4b, r.status + ' ' + zipBytes.subarray(0, 4).toString('hex'));
+    r = await own.post('delete', { path: 'Docs' });
+    check('restored folder can be deleted again', r.status === 200, r.status);
     r = await own.post('trash/empty', {});
     check('owner can empty trash', r.status === 200 && !fs.existsSync(path.join(OWN, '.trash')) , r.status);
 
@@ -205,6 +218,23 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('create bob (read-only) is 201', r.status === 201, r.status);
     r = await mk(own, { username: 'carol', password: 'carol-pass-1', quota: 2 * MB, perms: { upload: true, modify: true, delete: true, share: true } });
     check('create carol (can share) is 201', r.status === 201, r.status);
+
+    r = await own.post('admin/nodes', { id: 'secondary', name: 'Storage secondary', url: A, token: stack.token });
+    check('owner can register a secondary storage node', r.status === 201, r.status);
+    r = await mk(own, { username: 'nodeuser', password: 'nodeuser-pass', quota: 2 * MB, nodeId: 'secondary' });
+    check('new account can be assigned to secondary storage', r.status === 201 && (await r.json()).nodeId === 'secondary', r.status);
+    const nodeUser = client(B);
+    await nodeUser.login('nodeuser', 'nodeuser-pass');
+    u = await nodeUser.upload('node-file.txt', 'stored on secondary');
+    check('account file requests route to the assigned node', u.status === 200 && fs.readFileSync(path.join(S, 'users', 'nodeuser', 'node-file.txt'), 'utf8') === 'stored on secondary', JSON.stringify(u));
+    r = await own.send('PATCH', '/api/admin/users/nodeuser', { nodeId: 'primary' });
+    check('reassignment with existing data is rejected safely (409)', r.status === 409, r.status);
+    r = await own.get('/api/admin/nodes');
+    d = await r.json();
+    check('admin node inventory reports per-node account counts', r.status === 200 && d.nodes.some((n) => n.id === 'secondary' && n.accounts === 1), JSON.stringify(d.nodes));
+    r = await own.send('DELETE', '/api/admin/users/nodeuser');
+    check('delete archives account data from its assigned node', r.status === 200 && !fs.existsSync(path.join(S, 'users', 'nodeuser')), r.status);
+
     r = await own.get('/api/admin/users');
     d = await r.json();
     check('user list has 3 accounts, no password material', d.users.length === 3 && !JSON.stringify(d).includes('scrypt') && !JSON.stringify(d).includes('"pw"'), JSON.stringify(d).slice(0, 200));

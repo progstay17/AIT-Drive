@@ -15,6 +15,7 @@
     create(h) {
       const { el, fmtSize, fmtDate } = h;
       let users = [];
+      let nodes = [];
       let ov = null;
 
       const toGb = (b) => (b == null ? '' : String(Math.round((b / GB) * 100) / 100));
@@ -40,8 +41,8 @@
         box.replaceChildren(el('p', 'muted', 'Memuat panel admin…'));
         h.setHeading('Panel Admin', 'Akun, kuota disk, dan izin');
         try {
-          const [o, u] = await Promise.all([h.api('/api/admin/overview'), h.api('/api/admin/users')]);
-          ov = o; users = u.users;
+          const [o, u, n] = await Promise.all([h.api('/api/admin/overview'), h.api('/api/admin/users'), h.api('/api/admin/nodes')]);
+          ov = o; users = u.users; nodes = n.nodes;
           draw();
         } catch (e) {
           box.replaceChildren(el('p', 'form-error', e.message));
@@ -74,6 +75,21 @@
         );
         wrap.appendChild(cards);
 
+        const storageHead = el('div', 'admin-bar');
+        storageHead.appendChild(el('h2', 'section-title', 'Storage nodes'));
+        if (h.me().role === 'owner') {
+          const addNode = el('button', 'btn btn-secondary btn-sm', 'Tambah storage');
+          addNode.type = 'button'; addNode.onclick = openNodeForm; storageHead.appendChild(addNode);
+        }
+        wrap.appendChild(storageHead);
+        const nodeGrid = el('div', 'stat-grid');
+        for (const n of nodes) {
+          const c = card(n.name, n.online ? fmtSize(n.diskFree) + ' tersedia' : 'Offline', `${n.accounts} akun · ${n.primary ? 'Primary' : n.id}`, n.diskTotal ? ((n.diskTotal - n.diskFree) / n.diskTotal) * 100 : 0);
+          c.classList.add(n.online ? 'node-online' : 'node-offline');
+          nodeGrid.appendChild(c);
+        }
+        wrap.appendChild(nodeGrid);
+
         if (ov.allowOverbook) {
           wrap.appendChild(el('p', 'admin-note', 'Mode overbooking aktif: total kuota boleh melebihi kapasitas disk. Pastikan disk tidak penuh.'));
         } else {
@@ -102,7 +118,7 @@
         const scroll = el('div', 'file-list-wrap');
         const t = el('table', 'file-list admin-table');
         const hr = el('tr');
-        for (const x of ['Pengguna', 'Kuota', 'Izin', 'Login terakhir', '']) { const th = el('th', null, x); th.scope = 'col'; hr.appendChild(th); }
+        for (const x of ['Pengguna', 'Storage', 'Kuota', 'Izin', 'Login terakhir', '']) { const th = el('th', null, x); th.scope = 'col'; hr.appendChild(th); }
         const thead = el('thead'); thead.appendChild(hr); t.appendChild(thead);
         const tb = el('tbody');
         for (const u of users) {
@@ -115,6 +131,9 @@
           badges.appendChild(el('span', 'badge ' + (u.role === 'admin' ? 'badge-accent' : ''), u.role === 'admin' ? 'Admin' : 'Pengguna'));
           if (!u.active) badges.appendChild(el('span', 'badge badge-danger', 'Nonaktif'));
           c1.append(nm, badges);
+
+          const node = nodes.find((n) => n.id === u.nodeId);
+          const cNode = el('td', null, node ? node.name : (u.nodeId || 'primary'));
 
           const c2 = el('td', 'col-quota');
           if (u.quota != null) {
@@ -148,7 +167,7 @@
           del.onclick = () => remove(u);
           c5.append(edit, del);
 
-          tr.append(c1, c2, c3, c4, c5);
+          tr.append(c1, cNode, c2, c3, c4, c5);
           tb.appendChild(tr);
         }
         t.appendChild(tb); scroll.appendChild(t);
@@ -184,6 +203,11 @@
           const pwField = field(editing ? 'Password baru' : 'Password', pw, editing ? 'Mengganti password mengeluarkan akun ini dari semua perangkat.' : 'Catat dan berikan ke pengguna. Password tidak bisa dilihat lagi nanti.');
           pwField.appendChild(gen);
           form.appendChild(pwField);
+
+          const nodeSelect = el('select', 'input'); nodeSelect.id = 'f-node';
+          for (const n of nodes) nodeSelect.appendChild(new Option(`${n.name}${n.online ? '' : ' · offline'}`, n.id));
+          nodeSelect.value = editing ? (u.nodeId || 'primary') : 'primary';
+          form.appendChild(field('Storage node', nodeSelect, 'Akun ditempatkan pada satu PC storage. Pemindahan akun yang sudah berisi data membutuhkan migrasi terverifikasi.'));
 
           const role = el('select', 'input'); role.id = 'f-role';
           role.appendChild(new Option('Pengguna', 'user'));
@@ -242,7 +266,7 @@
             const q = fromGb(quota.value);
             if (Number.isNaN(q)) { err.textContent = 'Kuota harus berupa angka.'; err.hidden = false; return; }
             const perms = {}; for (const [k] of PERMS) perms[k] = checks[k].checked;
-            const body = { role: role.value, quota: q, perms, active: active.checked };
+            const body = { role: role.value, quota: q, perms, active: active.checked, nodeId: nodeSelect.value };
             if (pw.value) body.password = pw.value;
             if (!editing) { body.username = username.value; if (!pw.value) { err.textContent = 'Password wajib diisi.'; err.hidden = false; return; } }
             submit.disabled = true;
@@ -273,7 +297,33 @@
         catch (e) { h.fail('Gagal menghapus akun', e.message); }
       }
 
-      return { show, hide() { users = []; ov = null; } };
+      function openNodeForm() {
+        h.openModal((box, close) => {
+          box.style.width = 'min(100%, 520px)';
+          const head = el('div', 'modal-header'); head.appendChild(el('h2', 'modal-title', 'Tambah storage node')); box.appendChild(head);
+          const form = el('form', 'modal-body'); form.noValidate = true;
+          const id = el('input', 'input'); id.placeholder = 'mis. storage-02'; id.autocomplete = 'off';
+          const name = el('input', 'input'); name.placeholder = 'Nama PC / lokasi';
+          const url = el('input', 'input'); url.placeholder = 'https://storage-02.example.com';
+          const token = el('input', 'input'); token.type = 'password'; token.placeholder = 'AGENT_TOKEN dari Agent';
+          form.append(field('ID node (huruf kecil, angka, minus)', id), field('Nama storage', name), field('URL Agent melalui HTTPS / tunnel', url), field('Token Agent', token, 'Token disimpan di volume gateway dan tidak ditampilkan kembali.'));
+          const hint = el('p', 'field-hint', 'Jangan expose port Agent 4001 ke internet. Gunakan HTTPS melalui tunnel/reverse proxy yang sudah diamankan.');
+          form.appendChild(hint);
+          const err = el('p', 'form-error'); err.hidden = true; form.appendChild(err);
+          const actions = el('div', 'dialog-actions');
+          const cancel = el('button', 'btn btn-secondary', 'Batal'); cancel.type = 'button'; cancel.onclick = () => close(null);
+          const submit = el('button', 'btn btn-primary', 'Simpan storage'); submit.type = 'submit'; actions.append(cancel, submit); form.appendChild(actions);
+          form.addEventListener('submit', async (e) => {
+            e.preventDefault(); err.hidden = true; submit.disabled = true;
+            try { await h.send('POST', '/api/admin/nodes', { id: id.value, name: name.value, url: url.value, token: token.value }); close(true); h.ok('Storage ditambahkan', name.value); show(); }
+            catch (ex) { err.textContent = ex.message; err.hidden = false; }
+            finally { submit.disabled = false; }
+          });
+          box.appendChild(form); setTimeout(() => id.focus(), 0);
+        });
+      }
+
+      return { show, hide() { users = []; nodes = []; ov = null; } };
     },
   };
 })();
