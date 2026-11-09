@@ -170,6 +170,17 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     r = await own.get('/api/list?path=');
     d = await r.json();
     check('Docs gone from root listing, .trash hidden', !d.items.some((i) => i.name === 'Docs' || i.name === '.trash'), d.items.map((i) => i.name).join(', '));
+    r = await own.get('/api/trash');
+    d = await r.json();
+    const trashedDocs = d.items && d.items.find((item) => item.name === 'Docs');
+    check('Trash lists deleted folder and remembers its original path', !!trashedDocs && trashedDocs.originalPath === 'Docs', JSON.stringify(d.items));
+    r = await own.post('trash/restore', { id: trashedDocs.id });
+    check('restore returns folder to its original path', r.status === 200 && fs.existsSync(path.join(OWN, 'Docs', 'big.bin')), r.status);
+    r = await own.get('/api/download?path=Docs');
+    const zipBytes = Buffer.from(await r.arrayBuffer());
+    check('downloading a folder returns a ZIP archive', r.status === 200 && (r.headers.get('content-disposition') || '').includes('Docs.zip') && zipBytes[0] === 0x50 && zipBytes[1] === 0x4b, r.status + ' ' + zipBytes.subarray(0, 4).toString('hex'));
+    r = await own.post('delete', { path: 'Docs' });
+    check('restored folder can be deleted again', r.status === 200, r.status);
     r = await own.post('trash/empty', {});
     check('owner can empty trash', r.status === 200 && !fs.existsSync(path.join(OWN, '.trash')) , r.status);
 
