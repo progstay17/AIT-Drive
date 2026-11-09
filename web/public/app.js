@@ -922,7 +922,6 @@
   function uploadOne(file, dest, relativePath) {
     return new Promise((resolve) => {
       const task = addTransfer('upload', file.name, relativePath || file.name);
-      const t = toast({ kind: 'success', title: file.name, message: 'Mengunggah…', progress: true });
       const x = new XMLHttpRequest(); task.xhr = x;
       const fd = new FormData();
       fd.append('file', file, relativePath || file.webkitRelativePath || file.name);
@@ -932,12 +931,10 @@
         if (!e.lengthComputable) return;
         const p = Math.round((e.loaded / e.total) * 100);
         task.progress = p; task.message = fmtSize(e.loaded) + ' / ' + fmtSize(e.total);
-        t.setProgress(p); t.update({ message: 'Mengunggah… ' + p + '%' }); renderTransfers();
+        renderTransfers();
       };
       const failed = (msg) => {
         task.xhr = null; updateTransfer(task, { state: 'error', message: msg });
-        t.update({ kind: 'error', message: msg, hideProgress: true });
-        t.addAction('Coba lagi', () => { t.close(); uploadOne(file, dest, relativePath); });
         task.retry = () => uploadOne(file, dest, relativePath);
         resolve(false);
       };
@@ -945,7 +942,6 @@
         task.xhr = null;
         if (x.status >= 200 && x.status < 300) {
           task.progress = 100; updateTransfer(task, { state: 'done', progress: 100, message: fmtSize(file.size) });
-          t.setProgress(100); t.update({ message: 'Selesai' }); t.autoClose(3000);
           afterUpload(dest); resolve(true);
         } else {
           let m = 'Gagal mengunggah';
@@ -955,7 +951,7 @@
         }
       };
       x.onerror = () => failed('Koneksi terputus');
-      x.onabort = () => { task.xhr = null; updateTransfer(task, { state: 'cancelled', message: 'Dibatalkan' }); t.update({ kind: 'warning', message: 'Dibatalkan', hideProgress: true }); resolve(false); };
+      x.onabort = () => { task.xhr = null; updateTransfer(task, { state: 'cancelled', message: 'Dibatalkan' }); resolve(false); };
       x.send(fd);
     });
   }
