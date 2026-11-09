@@ -7,6 +7,15 @@
 - Storage Agent berada pada repository terpisah: https://github.com/progstay17/AIT-Drive-Agent.
 - Tunnel/reverse proxy harus memakai HTTPS publik dan listener VPS loopback.
 
+## Personal Access Tokens (PAT)
+
+- Token hanya ditampilkan satu kali saat dibuat; Gateway menyimpan hash, bukan secret.
+- Pemilik akun mengelola token miliknya dari menu Personal Access Tokens.
+- Owner dapat melihat metadata token lintas akun di Admin → Personal Access Tokens, mencabut token tertentu, atau mencabut seluruh token milik satu akun.
+- Panel admin tidak pernah mengembalikan token secret maupun hash.
+- CLI dapat mencabut PAT yang sedang dipakainya melalui endpoint self-revocation. Local logout tanpa opsi revoke hanya menghapus kredensial lokal.
+- Setiap PAT memiliki scope dan masa berlaku; perubahan permission akun dan status akun tetap diperiksa pada setiap request.
+
 ## Kontrol wajib
 
 1. Jangan commit `web/local.env`, `AGENT_TOKEN`, password, `SESSION_SECRET`, token tunnel, private SSH key, atau data storage.
