@@ -154,6 +154,17 @@ const json = (r) => r.json();
 
     r = await fetch(restartedUrl + '/api/list', { headers: { Cookie: user.cookie() } });
     check('existing cookie session still works after PAT support and restart', r.status === 200, r.status);
+    const bulkOne = await user.send('POST', '/api/tokens', { label: 'bulk one', scopes: ['read'], expiresInDays: 30 });
+    const bulkOneData = await json(bulkOne);
+    const bulkTwo = await user.send('POST', '/api/tokens', { label: 'bulk two', scopes: ['read'], expiresInDays: 30 });
+    const bulkTwoData = await json(bulkTwo);
+    r = await owner.send('DELETE', '/api/admin/tokens/account/patuser');
+    const bulkResult = await json(r);
+    check('owner can revoke all PATs for one account', r.status === 200 && bulkResult.revoked >= 2, r.status);
+    r = await fetch(restartedUrl + '/api/list', { headers: bearer(bulkOneData.token) });
+    check('bulk-revoked PAT one is rejected', r.status === 401, r.status);
+    r = await fetch(restartedUrl + '/api/list', { headers: bearer(bulkTwoData.token) });
+    check('bulk-revoked PAT two is rejected', r.status === 401, r.status);
   } catch (e) {
     check('test execution completed without unexpected exception', false, e.stack || e.message);
   } finally {
