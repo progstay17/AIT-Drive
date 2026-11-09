@@ -630,13 +630,58 @@
     try { await post('rename', { path: it.full, newName: n }); ok('Nama diubah', n); refresh(); } catch (e) { fail('Gagal mengganti nama', e.message); }
   }
   async function move(list) {
-    const d = await dialog({
-      title: 'Pindahkan ke folder',
-      message: 'Isi path folder tujuan, mis. Foto/2026. Kosongkan untuk root Drive.',
-      input: true, value: parentOf(list[0].full), placeholder: 'Foto/2026', confirm: 'Pindahkan',
+    const initial = parentOf(list[0].full);
+    const dest = await new Promise((resolve) => {
+      const modal = openModal((box, close) => {
+        box.classList.add('folder-picker-modal');
+        const head = el('div', 'modal-header');
+        head.append(el('h2', 'modal-title', 'Pindahkan ke folder'), el('p', 'muted folder-picker-help', 'Jelajahi folder tujuan. File baru dipindahkan setelah kamu konfirmasi.'));
+        box.appendChild(head);
+        const body = el('div', 'modal-body folder-picker');
+        const crumbs = el('nav', 'folder-picker-crumbs');
+        crumbs.setAttribute('aria-label', 'Lokasi tujuan');
+        const listBox = el('div', 'folder-picker-list');
+        const status = el('p', 'muted folder-picker-status', 'Memuat folder…');
+        const actions = el('div', 'dialog-actions folder-picker-actions');
+        const cancel = el('button', 'btn btn-secondary', 'Batal');
+        cancel.type = 'button'; cancel.onclick = () => close(null);
+        const choose = el('button', 'btn btn-primary', 'Pindahkan ke sini');
+        choose.type = 'button';
+        actions.append(cancel, choose);
+        body.append(crumbs, status, listBox, actions);
+        box.appendChild(body);
+        let current = initial;
+        choose.onclick = () => close(current);
+        async function browse(path) {
+          current = path; status.textContent = 'Memuat folder…'; listBox.replaceChildren(); choose.disabled = true;
+          crumbs.replaceChildren();
+          const parts = path ? path.split('/') : [];
+          const crumb = (label, target, last) => {
+            if (crumbs.childNodes.length) crumbs.appendChild(el('span', 'breadcrumb-sep', '/'));
+            const b = el('button', 'folder-crumb' + (last ? ' is-current' : ''), label);
+            b.type = 'button'; b.disabled = last; b.onclick = () => browse(target); crumbs.appendChild(b);
+          };
+          crumb('Drive Saya', '', parts.length === 0);
+          let acc = '';
+          parts.forEach((part, index) => { acc = join(acc, part); crumb(part, acc, index === parts.length - 1); });
+          try {
+            const data = await api('/api/list?' + qs({ path }));
+            if (current !== path) return;
+            const folders = (data.items || []).filter((item) => item.type === 'dir').sort((a, b) => a.name.localeCompare(b.name));
+            status.textContent = folders.length ? 'Ketuk folder untuk membukanya' : 'Tidak ada subfolder di lokasi ini';
+            for (const folder of folders) {
+              const row = el('button', 'folder-picker-item'); row.type = 'button';
+              row.append(svg(ICONS.folder, 'folder-picker-icon', 20), el('span', 'folder-picker-name', folder.name), svg('<path d="m9 18 6-6-6-6"/>', 'folder-picker-arrow', 16));
+              row.onclick = () => browse(join(path, folder.name)); listBox.appendChild(row);
+            }
+            choose.disabled = false;
+          } catch (e) { status.textContent = 'Folder tidak bisa dimuat: ' + e.message; }
+        }
+        browse(initial);
+        modalStack[modalStack.length - 1].onclose = resolve;
+      });
     });
-    if (d === null) return;
-    const dest = d.trim().replace(/^\/+|\/+$/g, '');
+    if (dest === null) return;
     let moved = 0;
     for (const it of list) {
       try { await post('move', { path: it.full, dest }); moved++; } catch (e) { fail(`Gagal memindahkan ${it.name}`, e.message); }
@@ -909,6 +954,10 @@
     loadStats(); pollStatus();
     clearInterval(pollTimer); pollTimer = setInterval(pollStatus, 20000);
   }
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}), { once: true });
+  }
+
   (async () => {
     try {
       const r = await fetch('/auth/me', { credentials: 'same-origin' });
