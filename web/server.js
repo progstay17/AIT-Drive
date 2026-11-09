@@ -275,7 +275,7 @@ const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
 });
 
 api.get('/status', async (req, res) => {
-  try { const r = await agentJson('GET', '/health', null, undefined, 4000); res.json({ agent: !!(r.json && r.json.ok) }); }
+  try { const r = await agentJson('GET', '/health', req.ctx, undefined, 4000); res.json({ agent: !!(r.json && r.json.ok) }); }
   catch { res.json({ agent: false }); }
 });
 api.get('/me', (req, res) => {
