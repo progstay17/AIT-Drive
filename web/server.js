@@ -324,15 +324,16 @@ admin.use((req, res, next) => {
 async function pcNumbers(nodeId = 'primary') {
   const ids = [...Object.keys(db.users), OWNER_ID];
   try {
-    const [d, us] = await Promise.all([agentCall('GET', '/sys/disk', undefined, nodeId), agentCall('POST', '/sys/usage', { ids: ids.filter((id) => id === OWNER_ID || (db.users[id] && (db.users[id].nodeId || 'primary') === nodeId)) }, nodeId)]);
+    const [d, us] = await Promise.all([agentCall('GET', '/sys/disk', undefined, nodeId), agentCall('POST', '/sys/usage', { ids: ids.filter((id) => (nodeId === 'primary' && id === OWNER_ID) || (db.users[id] && (db.users[id].nodeId || 'primary') === nodeId)) }, nodeId)]);
     return { online: true, disk: d, usage: us };
   } catch (e) {
     return { online: false, disk: { total: 0, free: 0 }, usage: {}, error: e.message };
   }
 }
-function overviewFrom(pc, excludeId) {
+function overviewFrom(pc, excludeId, nodeId = 'primary') {
   let usedUsers = 0, allocated = 0, allocatedOthers = 0;
-  for (const u of Object.values(db.users)) {
+  const nodeUsers = Object.values(db.users).filter((u) => (u.nodeId || 'primary') === nodeId);
+  for (const u of nodeUsers) {
     usedUsers += (pc.usage[u.id] && pc.usage[u.id].used) || 0;
     if (u.quota != null) { allocated += u.quota; if (u.id !== excludeId) allocatedOthers += u.quota; }
   }
@@ -341,14 +342,14 @@ function overviewFrom(pc, excludeId) {
     online: pc.online, diskTotal: pc.disk.total, diskFree: pc.disk.free,
     ownerUsed: (pc.usage[OWNER_ID] && pc.usage[OWNER_ID].used) || 0, usedUsers,
     allocated, allocatedOthers, capacity, unallocated: Math.max(0, capacity - allocated),
-    allowOverbook: ALLOW_OVERBOOK, userCount: Object.keys(db.users).length,
+    allowOverbook: ALLOW_OVERBOOK, userCount: nodeUsers.length,
   };
 }
-async function checkAllocation(excludeId, quota) {
+async function checkAllocation(excludeId, quota, nodeId = 'primary') {
   if (ALLOW_OVERBOOK || quota == null) return;
-  const pc = await pcNumbers();
+  const pc = await pcNumbers(nodeId);
   if (!pc.online) throw httpError(502, 'PC tidak terjangkau, jadi kapasitas disk tidak bisa diperiksa. Coba lagi saat PC menyala.');
-  const o = overviewFrom(pc, excludeId);
+  const o = overviewFrom(pc, excludeId, nodeId);
   if (o.allocatedOthers + quota > o.capacity) {
     throw httpError(400, `Alokasi melebihi kapasitas disk. Sisa yang bisa dialokasikan: ${fmtBytes(Math.max(0, o.capacity - o.allocatedOthers))}.`);
   }
@@ -395,10 +396,11 @@ admin.post('/nodes', wrap(async (req, res) => {
 admin.get('/overview', wrap(async (req, res) => res.json(overviewFrom(await pcNumbers()))));
 
 admin.get('/users', wrap(async (req, res) => {
-  const pc = await pcNumbers();
-  const list = Object.values(db.users).map((u) => publicUser(u, pc.usage));
+  const pcs = await Promise.all(Object.keys(db.nodes).map((id) => pcNumbers(id)));
+  const usage = Object.assign({}, ...pcs.map((pc) => pc.usage));
+  const list = Object.values(db.users).map((u) => publicUser(u, usage));
   list.sort((a, b) => a.id.localeCompare(b.id));
-  res.json({ users: list, online: pc.online });
+  res.json({ users: list, online: pcs.some((pc) => pc.online) });
 }));
 
 admin.post('/users', wrap(async (req, res) => {
@@ -417,7 +419,7 @@ admin.post('/users', wrap(async (req, res) => {
   const perms = acc.normPerms(b.perms);
   const pw = await acc.hashPw(b.password);
   if (db.users[id]) throw httpError(409, 'Username sudah dipakai.');
-  await checkAllocation(null, quota);
+  await checkAllocation(null, quota, nodeId);
   if (db.users[id]) throw httpError(409, 'Username sudah dipakai.');
   const now = Date.now();
   db.users[id] = { id, nodeId, role, active: b.active === false ? false : true, quota, perms, pw, tv: 1, createdAt: now, updatedAt: now };
@@ -448,7 +450,7 @@ admin.patch('/users/:id', wrap(async (req, res) => {
     if (used > 0) throw httpError(409, 'Akun masih memiliki data. Pemindahan storage memerlukan migrasi data terverifikasi; penempatan tidak diubah agar file tetap aman.');
     await agentCall('POST', `/sys/users/${id}/init`, {}, nextNodeId);
   }
-  if (quota !== (u.quota == null ? null : u.quota)) await checkAllocation(id, quota);
+  if (quota !== (u.quota == null ? null : u.quota)) await checkAllocation(id, quota, nextNodeId);
 
   u.role = newRole; u.quota = quota; u.perms = perms; u.nodeId = nextNodeId; u.updatedAt = Date.now();
   if (pw) { u.pw = pw; u.tv = (u.tv || 1) + 1; }
