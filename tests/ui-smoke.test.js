@@ -186,6 +186,7 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
 
     // ---- delete with confirmation (Delete key)
     nodeFor('upload.txt').dispatchEvent(ev('click'));
+    await new Promise((resolve) => setTimeout(resolve, 260));
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
     await waitFor(() => d.querySelector('.modal-backdrop'), 2000, 'delete confirm');
     check('Delete key asks for confirmation (danger button)', !!d.querySelector('.modal-backdrop .btn-danger-solid'));
