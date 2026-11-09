@@ -451,7 +451,7 @@ admin.patch('/users/:id', wrap(async (req, res) => {
     if (used > 0) throw httpError(409, 'Akun masih memiliki data. Pemindahan storage memerlukan migrasi data terverifikasi; penempatan tidak diubah agar file tetap aman.');
     await agentCall('POST', `/sys/users/${id}/init`, {}, nextNodeId);
   }
-  if (quota !== (u.quota == null ? null : u.quota)) await checkAllocation(id, quota, nextNodeId);
+  if (quota !== (u.quota == null ? null : u.quota) || nextNodeId !== (u.nodeId || 'primary')) await checkAllocation(id, quota, nextNodeId);
 
   u.role = newRole; u.quota = quota; u.perms = perms; u.nodeId = nextNodeId; u.updatedAt = Date.now();
   if (pw) { u.pw = pw; u.tv = (u.tv || 1) + 1; }
