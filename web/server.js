@@ -514,6 +514,17 @@ admin.get('/tokens', wrap(async (req, res) => {
   res.json({ tokens });
 }));
 
+admin.delete('/tokens/account/:accountId', wrap(async (req, res) => {
+  if (req.ctx.role !== 'owner') throw httpError(403, 'Hanya owner yang boleh mencabut token semua akun.');
+  const accountId = String(req.params.accountId || '');
+  if (accountId !== OWNER_ID && !USER_RE.test(accountId)) throw httpError(400, 'ID akun tidak valid.');
+  const ids = Object.values(db.tokens).filter((token) => token.accountId === accountId).map((token) => token.id);
+  if (!ids.length) throw httpError(404, 'Tidak ada token untuk akun tersebut.');
+  for (const id of ids) delete db.tokens[id];
+  await saveDb();
+  res.json({ ok: true, revoked: ids.length, accountId });
+}));
+
 admin.delete('/tokens/:id', wrap(async (req, res) => {
   if (req.ctx.role !== 'owner') throw httpError(403, 'Hanya owner yang boleh mencabut token semua akun.');
   const id = String(req.params.id || '');
