@@ -387,7 +387,7 @@ admin.post('/nodes', wrap(async (req, res) => {
   if (!name || name.length > 80) throw httpError(400, 'Nama storage wajib diisi (maksimal 80 karakter).');
   let parsed;
   try { parsed = new URL(url); } catch { throw httpError(400, 'URL storage tidak valid.'); }
-  if (!['http:', 'https:'].includes(parsed.protocol) || token.length < 24) throw httpError(400, 'URL harus HTTP(S) dan token minimal 24 karakter.');
+  if (!['http:', 'https:'].includes(parsed.protocol) || (parsed.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) || token.length < 24) throw httpError(400, 'Storage remote wajib memakai HTTPS dan token minimal 24 karakter. HTTP hanya diizinkan untuk loopback.');
   db.nodes[id] = { id, name, url, token, primary: false, createdAt: Date.now() };
   await saveDb();
   res.status(201).json({ id, name, primary: false });
@@ -446,7 +446,8 @@ admin.patch('/users/:id', wrap(async (req, res) => {
   if (!db.nodes[nextNodeId]) throw httpError(400, 'Storage node tidak ditemukan.');
   if (nextNodeId !== (u.nodeId || 'primary')) {
     const sourceUsage = await agentCall('POST', '/sys/usage', { ids: [id] }, u.nodeId || 'primary').catch(() => null);
-    const used = sourceUsage && sourceUsage[id] ? sourceUsage[id].used : 0;
+    if (!sourceUsage || !sourceUsage[id]) throw httpError(502, 'Storage asal tidak bisa diverifikasi. Penempatan akun tidak diubah.');
+    const used = sourceUsage[id].used || 0;
     if (used > 0) throw httpError(409, 'Akun masih memiliki data. Pemindahan storage memerlukan migrasi data terverifikasi; penempatan tidak diubah agar file tetap aman.');
     await agentCall('POST', `/sys/users/${id}/init`, {}, nextNodeId);
   }
@@ -456,7 +457,7 @@ admin.patch('/users/:id', wrap(async (req, res) => {
   if (pw) { u.pw = pw; u.tv = (u.tv || 1) + 1; }
   if (active !== u.active) { u.active = active; u.tv = (u.tv || 1) + 1; } // any status change ends old sessions
   await saveDb();
-  res.json(publicUser(u, (await pcNumbers()).usage));
+  res.json(publicUser(u, (await pcNumbers(nextNodeId)).usage));
 }));
 
 admin.delete('/users/:id', wrap(async (req, res) => {
