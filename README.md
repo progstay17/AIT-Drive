@@ -120,7 +120,41 @@ Panduan lengkap: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Panduan Agent dan tun
 | `DATA_DIR` | `web/data` (`/data` di Docker) | Data akun; pasang persistent volume di Coolify |
 | `ALLOW_OVERBOOK` | `false` | Izinkan total kuota melebihi kapasitas disk |
 
-Template: [`web/.env.example`](web/.env.example). Konfigurasi Agent: [`agent.env.example` pada repo Agent](https://github.com/progstay17/AIT-Drive-Agent/blob/main/agent.env.example).
+Template lengkap: [`web/.env.example`](web/.env.example). Konfigurasi Agent: [`agent.env.example` pada repo Agent](https://github.com/progstay17/AIT-Drive-Agent/blob/main/agent.env.example).
+
+### Arti dan aturan setiap environment variable Gateway
+
+| Variable | Wajib? | Kapan diubah |
+|---|---|---|
+| `ADMIN_USER` | Ya | Username owner untuk login pertama/panel admin. |
+| `ADMIN_PASSWORD` | Ya | Password owner yang kuat; jangan gunakan contoh placeholder. |
+| `SESSION_SECRET` | Ya | Secret acak minimal 32 karakter untuk sesi dan signed share link. Jangan diganti sembarangan karena sesi/link yang sudah diterbitkan dapat tidak berlaku. |
+| `AGENT_URL` | Ya | URL HTTPS Agent utama (`primary`), tanpa slash akhir. Untuk lokal dapat memakai `http://127.0.0.1:4001`. |
+| `AGENT_TOKEN` | Ya | Token yang sama persis dengan `AGENT_TOKEN` Agent utama. Jangan gunakan token Agent PC lain untuk primary. |
+| `COOKIE_SECURE` | Tidak | `true` jika Gateway diakses lewat HTTPS; `false` hanya untuk pengembangan lokal HTTP. |
+| `SESSION_HOURS` | Tidak | Masa berlaku sesi dalam jam; default `168` (7 hari). |
+| `PORT` | Tidak | Port proses Gateway; default `3000`. Sesuaikan hanya jika platform/container memerlukan port lain. |
+| `DATA_DIR` | Tidak | Lokasi database JSON akun dan konfigurasi storage node; default `web/data` saat lokal dan `/data` pada image Docker. Di Coolify, mount persistent volume ke `/data`. |
+| `ALLOW_OVERBOOK` | Tidak | Default `false`; `true` mengizinkan total kuota akun melebihi kapasitas disk yang tersedia (thin provisioning). |
+
+### Environment vs konfigurasi storage node tambahan
+
+Environment Gateway di atas hanya menghubungkan **node primary** agar instalasi satu-Agent yang lama tetap berjalan. Untuk PC/Agent kedua dan seterusnya, **jangan menambahkan atau mengganti `AGENT_URL` / `AGENT_TOKEN`**. Siapkan Agent dan tunnel HTTPS pada PC tersebut, lalu login sebagai owner → Admin → Storage nodes → Tambah storage. Isi:
+
+- **ID:** identitas unik, huruf kecil/angka/garis minus/underscore (contoh `storage-02`).
+- **Nama:** nama PC atau lokasi yang mudah dikenali.
+- **URL:** hostname HTTPS publik yang menuju Agent melalui reverse proxy/tunnel.
+- **Token:** nilai `AGENT_TOKEN` khusus dari `agent.env` pada PC tersebut.
+
+Setelah node terdaftar, pilih storage tersebut ketika membuat akun atau mengedit akun. Satu akun berada pada satu node, sedangkan satu node dapat menampung banyak akun. Setiap PC harus memiliki `STORAGE_ROOT` sendiri dan token unik; jangan memakai folder storage yang sama secara bersamaan pada dua Agent.
+
+URL dan token node tambahan disimpan dalam database Gateway di `DATA_DIR` (Coolify: volume `/data`). Karena itu:
+- Persistent volume `/data` wajib dipertahankan saat redeploy/recreate container.
+- Backup `/data` secara aman karena berisi data akun serta konfigurasi rahasia koneksi Agent.
+- Jangan menghapus atau mengganti volume `/data` ketika update aplikasi.
+- Jangan menaruh token node tambahan di source code, Git, atau browser.
+
+**Penting:** memindahkan akun yang sudah berisi file ke node lain saat ini ditolak dengan aman. Buat akun baru langsung pada node tujuan, atau tunggu fitur migrasi data terverifikasi sebelum memindahkan akun lama.
 
 ## Struktur repository
 
