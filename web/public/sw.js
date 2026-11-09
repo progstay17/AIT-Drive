@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'ait-drive-static-v1';
+const CACHE = 'ait-drive-static-v2';
 const ASSETS = ['/','/style.css','/app.js','/admin.js','/theme.js','/manifest.webmanifest','/icons/ait-drive.svg'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting()));

@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-<rect width="512" height="512" rx="112" fill="#0C1B2B"/>
-<path d="M144 102h151l83 83v220a26 26 0 0 1-26 26H160a26 26 0 0 1-26-26V128a26 26 0 0 1 26-26Z" fill="#132A40" stroke="#78B8D0" stroke-width="18" stroke-linejoin="round"/>
-<path d="M295 104v83h82" fill="none" stroke="#78B8D0" stroke-width="18" stroke-linejoin="round"/>
-<path d="M194 258h124M194 310h124M194 362h82" fill="none" stroke="#E7F0F7" stroke-width="20" stroke-linecap="round"/>
+  <title>AIT Drive</title>
+  <rect width="512" height="512" rx="112" fill="#0C1B2B"/>
+  <path d="M256 82 104 390h72l80-164 80 164h72L256 82Z" fill="#72C6DF"/>
+  <path d="M184 286h144l-24-49H208l-24 49Z" fill="#0C1B2B"/>
+  <path d="M144 390h224" fill="none" stroke="#EAF5FA" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="256" cy="390" r="10" fill="#0C1B2B"/>
 </svg>
