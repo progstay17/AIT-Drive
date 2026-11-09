@@ -8,8 +8,9 @@
   "scripts": {
     "install:all": "npm install && npm --prefix web install",
     "start:web": "npm --prefix web start",
-    "test": "node tests/api.test.js && node tests/ui-smoke.test.js",
+    "test": "node tests/api.test.js && node tests/pat.test.js && node tests/ui-smoke.test.js",
     "test:api": "node tests/api.test.js",
+    "test:pat": "node tests/pat.test.js",
     "test:ui": "node tests/ui-smoke.test.js"
   },
   "devDependencies": { "jsdom": "^30.1.3" }
