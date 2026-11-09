@@ -284,14 +284,17 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
     check('context menu hides actions the account may not do', !bl.includes('Ganti nama') && !bl.includes('Buat link berbagi') && bl.includes('Hapus') && bl.includes('Unduh'), bl.join(','));
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
-    // delete -> trash counts -> empty trash button
+    // delete -> inspect Trash -> empty permanently
     await ctxClick('budi.txt', 'Hapus');
     await submitDialog();
     await waitFor(() => !$('trash-btn').hidden, 4000, 'trash button');
-    check('after delete the "Kosongkan sampah" button appears', /Kosongkan sampah/.test($('trash-btn').textContent));
+    check('after delete the "Lihat sampah" button appears', /Lihat sampah/.test($('trash-btn').textContent));
     $('trash-btn').click();
-    await waitFor(() => d.querySelector('.modal-backdrop form'), 3000, 'empty trash dialog').catch(() => {});
-    if (d.querySelector('.modal-backdrop form')) await submitDialog();
+    await waitFor(() => [...d.querySelectorAll('.modal-backdrop button')].some((b) => b.textContent === 'Kosongkan sampah'), 3000, 'Trash view');
+    const emptyTrash = [...d.querySelectorAll('.modal-backdrop button')].find((b) => b.textContent === 'Kosongkan sampah');
+    emptyTrash.click();
+    await waitFor(() => d.querySelector('.modal-backdrop form'), 3000, 'empty trash confirmation');
+    await submitDialog();
     await waitFor(() => $('trash-btn').hidden === true, 4000, 'trash emptied');
     check('emptying the trash hides the button again', fs.readdirSync(BD).every((n) => n !== '.trash' || fs.readdirSync(path.join(BD, '.trash')).length === 0));
 
