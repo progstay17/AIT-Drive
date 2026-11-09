@@ -34,7 +34,7 @@ if (SESSION_SECRET.length < 32) { console.error('SESSION_SECRET must be at least
 
 const { db, save: saveDb } = acc.openStore(DATA_DIR);
 const { httpError, USER_RE, RESERVED_RE, ALL_PERMS, fmtBytes } = acc;
-if (!db.nodes.primary) db.nodes.primary = { id: 'primary', name: 'Storage utama', url: AGENT_URL, token: AGENT_TOKEN, primary: true };
+db.nodes.primary = { id: 'primary', name: (db.nodes.primary && db.nodes.primary.name) || 'Storage utama', url: AGENT_URL, token: AGENT_TOKEN, primary: true };
 function getNode(id) {
   const node = db.nodes[String(id || 'primary')] || db.nodes.primary;
   return node && node.url && node.token ? node : db.nodes.primary;
