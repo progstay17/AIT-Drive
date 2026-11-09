@@ -528,7 +528,7 @@
       if (Date.now() < suppressClickUntil) return;
       select(i, e);
     });
-    node.addEventListener('dblclick', () => { if (!COARSE) openItem(it); });
+    node.addEventListener('dblclick', () => openItem(it));
     node.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); openItem(it); }
       else if (e.key === ' ') { e.preventDefault(); select(i, e); }
