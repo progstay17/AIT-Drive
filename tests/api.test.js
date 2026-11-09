@@ -115,6 +115,8 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     r = await own.get('/api/list?path=Docs');
     let d = await r.json();
     check('list shows 3 files', d.items && d.items.length === 3, d.items && d.items.map((i) => i.name).join(', '));
+    u = await own.upload('nested/deep/inside.txt', 'nested folder upload', 'Docs');
+    check('folder-style multipart path creates nested subfolders', u.status === 200 && fs.readFileSync(path.join(OWN, 'Docs', 'nested', 'deep', 'inside.txt'), 'utf8') === 'nested folder upload', JSON.stringify(u.json));
     r = await own.get('/api/download?path=Docs/hello.txt', { Range: 'bytes=0-4' });
     check('range request returns 206 + "hello"', r.status === 206 && (await r.text()) === 'hello', r.status);
 
