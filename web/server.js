@@ -114,7 +114,8 @@ function resolvePat(value) {
 
   let account;
   if (record.accountId === OWNER_ID) {
-    account = { id: OWNER_ID, name: ADMIN_USER, role: 'owner', nodeId: 'primary', quota: null, perms: { ...ALL_PERMS } };
+    // PATs are file-client credentials only, even when minted by the owner session.
+    account = { id: OWNER_ID, name: ADMIN_USER, role: 'user', nodeId: 'primary', quota: null, perms: { ...ALL_PERMS } };
   } else {
     const u = USER_RE.test(String(record.accountId)) ? db.users[record.accountId] : null;
     if (!u) return { status: 401, error: 'Akun token tidak ditemukan.' };
