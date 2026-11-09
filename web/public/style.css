@@ -593,3 +593,34 @@ select.input { appearance: auto; }
   .selection-toolbar .btn { min-height: 34px; padding-inline: 9px; font-size: 11px; }
   .selection-count { width: 100%; margin: 0 0 2px; }
 }
+
+
+/* Personal Access Tokens */
+#tokens-btn { width: 100%; justify-content: flex-start; }
+.token-intro { margin: 0 0 18px; }
+.token-create-form { padding: 16px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.token-create-form .form-field { margin: 0 0 14px; }
+.token-scope-field { display: grid; gap: 8px; margin: 0 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.token-scope-field legend { padding: 0 6px; color: var(--ink-2); font-size: 12px; font-weight: 650; }
+.token-scope-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.token-scope-row input { width: 16px; height: 16px; accent-color: var(--accent); }
+.token-scope-row input:disabled { cursor: not-allowed; }
+.token-scope-copy { display: grid; gap: 1px; }
+.token-scope-copy strong { font-size: 12px; font-family: var(--font-mono); }
+.token-scope-copy small { color: var(--ink-3); font-size: 11px; }
+.token-secret-panel { display: grid; gap: 10px; margin-top: 16px; padding: 16px; border: 1px solid var(--accent); border-radius: var(--r-md); background: var(--accent-soft); }
+.token-secret-title { color: var(--accent-ink); font-weight: 700; }
+.token-secret-panel p { margin: 0; font-size: 12px; }
+.token-secret-value { min-height: 82px; padding: 10px; resize: vertical; font: 12px/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.token-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 10px; }
+.token-list-head h3 { margin: 0; font-size: 14px; }
+.token-list { display: grid; gap: 8px; }
+.token-empty { margin: 0; padding: 18px; border: 1px dashed var(--line-strong); border-radius: var(--r-sm); text-align: center; font-size: 12px; }
+.token-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.token-row-info { display: grid; gap: 3px; min-width: 0; }
+.token-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.token-row-meta { color: var(--ink-3); font: 10px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+@media (max-width: 420px) {
+  .token-row { align-items: flex-start; }
+  .token-row .btn { flex: none; }
+}

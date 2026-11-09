@@ -1127,6 +1127,108 @@
     });
   };
 
+  // ---------------------------------------------------------------- personal access tokens
+  $('tokens-btn').onclick = async () => {
+    let tokenData;
+    try { tokenData = await api('/api/tokens'); }
+    catch (e) { fail('Token tidak bisa dibuka', e.message); return; }
+    openModal((box, close) => {
+      box.style.width = 'min(100%, 680px)';
+      const head = el('div', 'modal-header');
+      head.append(el('h2', 'modal-title', 'Personal Access Tokens'), el('span', 'eyebrow', 'API ACCESS'));
+      box.appendChild(head);
+      const body = el('div', 'modal-body');
+      const intro = el('p', 'muted token-intro', 'Buat kredensial untuk CLI, MCP, dan otomasi. Secret hanya ditampilkan satu kali saat dibuat.');
+      body.appendChild(intro);
+
+      const form = el('form', 'token-create-form');
+      const label = el('input', 'input'); label.type = 'text'; label.maxLength = 80; label.required = true; label.placeholder = 'Contoh: Desktop Commander';
+      const labelWrap = el('label', 'form-field'); labelWrap.append(document.createTextNode('Nama token'), label); form.appendChild(labelWrap);
+      const scopeWrap = el('fieldset', 'token-scope-field');
+      const legend = el('legend', 'field-label'); legend.textContent = 'Akses yang diizinkan'; scopeWrap.appendChild(legend);
+      const scopeInputs = {};
+      const scopeInfo = [
+        ['read', 'Baca file, pencarian, dan statistik'],
+        ['upload', 'Unggah file'],
+        ['modify', 'Buat folder, ubah nama, dan pindahkan'],
+        ['delete', 'Hapus, pulihkan, dan kosongkan sampah'],
+        ['share', 'Buat link berbagi'],
+      ];
+      for (const [key, description] of scopeInfo) {
+        const row = el('label', 'token-scope-row');
+        const check = el('input'); check.type = 'checkbox'; check.checked = key === 'read'; check.disabled = key === 'read' || !me.perms[key];
+        const copy = el('span', 'token-scope-copy');
+        copy.append(el('strong', null, key), el('small', null, description));
+        row.append(check, copy); scopeWrap.appendChild(row); scopeInputs[key] = check;
+      }
+      form.appendChild(scopeWrap);
+      const expiry = el('select', 'input');
+      for (const [value, text] of [['30','30 hari'],['90','90 hari'],['365','1 tahun'],['730','2 tahun'],['3650','10 tahun']]) {
+        const option = el('option', null, text); option.value = value; expiry.appendChild(option);
+      }
+      const expiryWrap = el('label', 'form-field'); expiryWrap.append(document.createTextNode('Masa berlaku'), expiry); form.appendChild(expiryWrap);
+      const error = el('p', 'form-error'); error.hidden = true; form.appendChild(error);
+      const submit = el('button', 'btn btn-primary', 'Buat token'); submit.type = 'submit';
+      form.appendChild(submit);
+      body.appendChild(form);
+
+      const secretPanel = el('section', 'token-secret-panel'); secretPanel.hidden = true;
+      secretPanel.append(el('div', 'token-secret-title', 'Simpan secret ini sekarang'), el('p', 'muted', 'AIT Drive tidak menyimpan secret utuh dan tidak bisa menampilkannya lagi setelah jendela ini ditutup.'));
+      const secretField = el('textarea', 'input token-secret-value'); secretField.readOnly = true; secretField.rows = 3; secretPanel.appendChild(secretField);
+      const copyButton = el('button', 'btn btn-secondary btn-sm', 'Salin token'); copyButton.type = 'button';
+      copyButton.onclick = async () => {
+        try { await navigator.clipboard.writeText(secretField.value); ok('Token disalin', 'Simpan di credential store yang aman.'); }
+        catch { secretField.focus(); secretField.select(); info('Pilih token', 'Clipboard tidak tersedia. Salin teks yang dipilih secara manual.'); }
+      };
+      secretPanel.appendChild(copyButton);
+      body.appendChild(secretPanel);
+
+      const listHead = el('div', 'token-list-head');
+      listHead.append(el('h3', null, 'Token aktif'), el('span', 'eyebrow', String(tokenData.tokens.length).padStart(2, '0')));
+      body.appendChild(listHead);
+      const list = el('div', 'token-list');
+      body.appendChild(list);
+      const renderList = () => {
+        list.replaceChildren();
+        if (!tokenData.tokens.length) { list.appendChild(el('p', 'muted token-empty', 'Belum ada token.')); return; }
+        for (const item of tokenData.tokens) {
+          const row = el('article', 'token-row');
+          const info = el('div', 'token-row-info');
+          info.append(el('strong', 'token-row-name', item.label), el('span', 'token-row-meta', item.scopes.join(' · ') + ' · berlaku sampai ' + fmtDate(item.expiresAt)));
+          const revoke = el('button', 'btn btn-danger btn-sm', 'Cabut'); revoke.type = 'button';
+          revoke.onclick = async () => {
+            const yes = await dialog({ title: 'Cabut token?', message: 'Aplikasi yang memakai token ini akan kehilangan akses pada permintaan berikutnya.', confirm: 'Cabut token', danger: true });
+            if (!yes) return;
+            revoke.disabled = true;
+            try {
+              await send('DELETE', '/api/tokens/' + encodeURIComponent(item.id));
+              tokenData.tokens = tokenData.tokens.filter((x) => x.id !== item.id);
+              renderList(); ok('Token dicabut', item.label);
+            } catch (e) { revoke.disabled = false; fail('Gagal mencabut token', e.message); }
+          };
+          row.append(info, revoke); list.appendChild(row);
+        }
+      };
+      renderList();
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault(); error.hidden = true; submit.disabled = true;
+        const scopes = Object.keys(scopeInputs).filter((key) => scopeInputs[key].checked);
+        try {
+          const created = await post('tokens', { label: label.value.trim(), scopes, expiresInDays: Number(expiry.value) });
+          secretField.value = created.token; secretPanel.hidden = false;
+          tokenData.tokens.unshift({ id: created.id, label: created.label, scopes: created.scopes, createdAt: created.createdAt, expiresAt: created.expiresAt });
+          renderList(); label.value = '';
+          ok('Token dibuat', 'Secret hanya muncul di panel ini satu kali.');
+        } catch (e) { error.textContent = e.message; error.hidden = false; }
+        finally { submit.disabled = false; }
+      });
+      const footer = el('div', 'dialog-actions');
+      const done = el('button', 'btn btn-secondary', 'Tutup'); done.type = 'button'; done.onclick = () => close(null);
+      footer.appendChild(done); body.appendChild(footer); box.appendChild(body);
+      setTimeout(() => label.focus(), 0);
+    });
+  };
+
   $('trash-btn').onclick = async () => {
     try {
       const data = await api('/api/trash');

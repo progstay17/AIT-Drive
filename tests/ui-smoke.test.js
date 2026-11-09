@@ -91,6 +91,23 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
     await waitFor(() => !$('app-view').hidden && d.querySelectorAll('.file-card').length === 4, 5000, 'file grid');
     check('correct login opens the app', $('login-view').hidden === true);
 
+    // ---- Personal Access Token management
+    check('account panel exposes Personal Access Tokens', !!$('tokens-btn'));
+    $('tokens-btn').click();
+    await waitFor(() => d.querySelector('.token-create-form'), 3000, 'PAT management modal');
+    const tokenForm = d.querySelector('.token-create-form');
+    tokenForm.querySelector('input[type="text"]').value = 'UI smoke test';
+    tokenForm.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await waitFor(() => d.querySelector('.token-secret-value')?.value.startsWith('aitd_'), 4000, 'one-time PAT secret');
+    const generatedSecret = d.querySelector('.token-secret-value').value;
+    check('PAT modal creates and reveals a token exactly once', /^aitd_[A-Za-z0-9_-]{12}\.[A-Za-z0-9_-]{43}$/.test(generatedSecret));
+    check('PAT appears in active token list without exposing secret there', d.querySelector('.token-list').textContent.includes('UI smoke test') && !d.querySelector('.token-list').textContent.includes(generatedSecret));
+    d.querySelector('.token-secret-panel button').click();
+    await waitFor(() => copied === generatedSecret, 2000, 'copy PAT secret');
+    check('PAT secret can be copied to the clipboard', copied === generatedSecret);
+    [...d.querySelectorAll('.token-create-form ~ .dialog-actions button, .modal-body > .dialog-actions button')].at(-1)?.click();
+    if (d.querySelector('.modal-backdrop')) d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
     // ---- browsing
     check('grid shows folder first then files', JSON.stringify(names()) === JSON.stringify(['Projects', 'notes.txt', 'photo.png', 'report.pdf']), names().join(','));
     check('item count shown', $('count').textContent === '4 item');
