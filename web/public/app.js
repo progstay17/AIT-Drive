@@ -739,6 +739,8 @@
   $('upload-btn').onclick = () => { pickFiles(); closeDrawer(); };
   $('upload-btn-top').onclick = pickFiles;
   $('file-input').onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ''; };
+  $('folder-upload-btn').onclick = () => $('folder-input').click();
+  $('folder-input').onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ''; };
 
   let afterTimer;
   function afterUpload(dest) {
@@ -761,7 +763,7 @@
       const t = toast({ kind: 'success', title: file.name, message: 'Mengunggah…', progress: true });
       const x = new XMLHttpRequest();
       const fd = new FormData();
-      fd.append('file', file, file.name);
+      fd.append('file', file, file.webkitRelativePath || file.name);
       x.open('POST', '/api/upload?' + qs({ path: dest }));
       x.setRequestHeader('X-Requested-With', 'drive');
       x.upload.onprogress = (e) => {
@@ -826,8 +828,8 @@
       cap2.textContent = s.quota != null ? `${fmtSize(s.free)} sisa kuota` : `${fmtSize(s.free)} masih kosong di PC`;
       cap2.classList.toggle('is-warn', s.quota != null && pct >= 90);
       const tb = $('trash-btn');
-      tb.hidden = !(can('delete') && s.trash > 0);
-      tb.textContent = `Kosongkan sampah (${fmtSize(s.trash || 0)})`;
+      tb.hidden = !(s.trash > 0);
+      tb.textContent = `Lihat sampah (${fmtSize(s.trash || 0)})`;
     } catch {}
   }
   let previousAgentState = null;
@@ -897,6 +899,7 @@
     const up = can('upload'), mod = can('modify');
     for (const id of ['upload-btn', 'upload-btn-top']) { $(id).disabled = !up; $(id).title = up ? '' : 'Tidak punya izin mengunggah'; }
     for (const id of ['mkdir-btn', 'mkdir-btn-top']) { $(id).disabled = !mod; $(id).title = mod ? '' : 'Tidak punya izin membuat folder'; }
+    $('folder-upload-btn').disabled = !up; $('folder-upload-btn').title = up ? '' : 'Tidak punya izin mengunggah';
   }
 
   $('pw-btn').onclick = () => {
@@ -933,9 +936,40 @@
   };
 
   $('trash-btn').onclick = async () => {
-    const yes = await dialog({ title: 'Kosongkan sampah?', message: 'Semua item di sampah dihapus PERMANEN dari PC dan kuota kamu dibebaskan. Ini tidak bisa dibatalkan.', confirm: 'Kosongkan', danger: true });
-    if (!yes) return;
-    try { await post('trash/empty', {}); ok('Sampah dikosongkan'); loadStats(); } catch (e) { fail('Gagal mengosongkan sampah', e.message); }
+    try {
+      const data = await api('/api/trash');
+      openModal((box, close) => {
+        box.style.width = 'min(100%, 680px)';
+        const head = el('div', 'modal-header');
+        head.appendChild(el('h2', 'modal-title', 'Sampah'));
+        box.appendChild(head);
+        const body = el('div', 'modal-body');
+        if (!data.items.length) body.appendChild(el('p', 'muted', 'Sampah kosong.'));
+        for (const item of data.items) {
+          const row = el('div', 'admin-row');
+          const info = el('div');
+          info.append(el('div', 'file-name', item.name), el('div', 'field-hint', item.originalPath || 'Lokasi asal tidak diketahui'));
+          const restore = el('button', 'btn btn-secondary btn-sm', 'Pulihkan');
+          restore.type = 'button';
+          restore.onclick = async () => {
+            restore.disabled = true;
+            try { await post('trash/restore', { id: item.id }); ok('Item dipulihkan', item.name); close(true); load(cwd); loadStats(); }
+            catch (e) { restore.disabled = false; fail('Gagal memulihkan', e.message); }
+          };
+          row.append(info, restore); body.appendChild(row);
+        }
+        const actions = el('div', 'dialog-actions');
+        const empty = el('button', 'btn btn-danger', 'Kosongkan sampah'); empty.type = 'button'; empty.disabled = !data.items.length || !can('delete');
+        empty.onclick = async () => {
+          const yes = await dialog({ title: 'Hapus permanen?', message: 'Semua item di sampah akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.', confirm: 'Hapus permanen', danger: true });
+          if (!yes) return;
+          try { await post('trash/empty', {}); ok('Sampah dikosongkan'); close(true); loadStats(); }
+          catch (e) { fail('Gagal mengosongkan sampah', e.message); }
+        };
+        const done = el('button', 'btn btn-secondary', 'Tutup'); done.type = 'button'; done.onclick = () => close(null);
+        actions.append(empty, done); body.appendChild(actions); box.appendChild(body);
+      });
+    } catch (e) { fail('Gagal membuka sampah', e.message); }
   };
 
   async function start() {
