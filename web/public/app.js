@@ -837,8 +837,8 @@
       list.appendChild(row);
     }
   }
-  function startDownload(it) {
-    const task = addTransfer('download', it.name, it.type === 'dir' ? 'Folder ZIP' : fmtSize(it.size));
+  function startDownload(it, existingTask) {
+    const task = existingTask || addTransfer('download', it.name, it.type === 'dir' ? 'Folder ZIP' : fmtSize(it.size));
     const x = new XMLHttpRequest(); task.xhr = x;
     x.open('GET', dlUrl(it.full));
     x.responseType = 'blob';
@@ -860,7 +860,7 @@
         let msg = 'Gagal mengunduh';
         try { msg = JSON.parse(x.responseText).error || msg; } catch {}
         updateTransfer(task, { state: 'error', message: msg });
-        task.retry = () => { task.state = 'active'; task.progress = 0; startDownload(it); renderTransfers(); };
+        task.retry = () => { task.state = 'active'; task.progress = 0; task.message = 'Mencoba ulang…'; startDownload(it, task); renderTransfers(); };
       }
     };
     x.onerror = () => { task.xhr = null; updateTransfer(task, { state: 'error', message: 'Koneksi terputus' }); };
