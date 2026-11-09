@@ -93,12 +93,12 @@ function setSessionCookie(res, payload) {
 // Turns a session payload into the caller's CURRENT rights (read from the account store on every
 // request, so edits to quota/permissions and disabling an account take effect immediately).
 function resolveCtx(sess) {
-  if (sess.o) return { ctx: { id: OWNER_ID, name: sess.n || ADMIN_USER, role: 'owner', quota: null, perms: { ...ALL_PERMS } } };
+  if (sess.o) return { ctx: { id: OWNER_ID, name: sess.n || ADMIN_USER, role: 'owner', nodeId: 'primary', quota: null, perms: { ...ALL_PERMS } } };
   const u = USER_RE.test(String(sess.u)) ? db.users[sess.u] : null;
   if (!u) return { status: 401, error: 'Akun tidak ditemukan. Silakan masuk lagi.' };
   if (!u.active) return { status: 403, error: 'Akun dinonaktifkan. Hubungi admin.' };
   if (String(u.tv) !== String(sess.tv)) return { status: 401, error: 'Sesi tidak berlaku lagi. Silakan masuk lagi.' };
-  return { ctx: { id: u.id, name: u.id, role: u.role, quota: u.quota == null ? null : u.quota, perms: u.role === 'admin' ? { ...ALL_PERMS } : { ...u.perms } } };
+  return { ctx: { id: u.id, name: u.id, role: u.role, nodeId: u.nodeId || 'primary', quota: u.quota == null ? null : u.quota, perms: u.role === 'admin' ? { ...ALL_PERMS } : { ...u.perms } } };
 }
 // what the agent needs to know about the caller (the agent trusts only the shared AGENT_TOKEN)
 function userHeaders(c) {
@@ -122,9 +122,9 @@ app.use((req, res, next) => {
 });
 
 // ---------- talking to the agent ----------
-function agentJson(method, agentPath, ctx, body, timeoutMs = 8000) {
+function agentJson(method, agentPath, ctx, body, timeoutMs = 8000, nodeId) {
   return new Promise((resolve, reject) => {
-    const node = getNode(ctx && ctx.nodeId);
+    const node = getNode(nodeId || (ctx && ctx.nodeId));
     const target = nodeUrl(node);
     const lib = target.protocol === 'https:' ? https : http;
     const port = target.port || (target.protocol === 'https:' ? 443 : 80);
@@ -148,9 +148,9 @@ function agentJson(method, agentPath, ctx, body, timeoutMs = 8000) {
   });
 }
 // system call to the agent (no user): returns the JSON body or throws an httpError for the admin panel
-async function agentCall(method, agentPath, body) {
+async function agentCall(method, agentPath, body, nodeId = 'primary') {
   let r;
-  try { r = await agentJson(method, agentPath, null, body); }
+  try { r = await agentJson(method, agentPath, null, body, 8000, nodeId); }
   catch { throw httpError(502, MSG_OFFLINE); }
   if (r.status === 401) throw httpError(502, MSG_TOKEN);
   if (r.status >= 400) throw httpError(r.status, (r.json && r.json.error) || 'Agent error');
@@ -321,10 +321,10 @@ admin.use((req, res, next) => {
 });
 
 // disk numbers + per-account usage come from the PC; if it is off the panel still works (numbers show 0)
-async function pcNumbers() {
+async function pcNumbers(nodeId = 'primary') {
   const ids = [...Object.keys(db.users), OWNER_ID];
   try {
-    const [d, us] = await Promise.all([agentCall('GET', '/sys/disk'), agentCall('POST', '/sys/usage', { ids })]);
+    const [d, us] = await Promise.all([agentCall('GET', '/sys/disk', undefined, nodeId), agentCall('POST', '/sys/usage', { ids: ids.filter((id) => id === OWNER_ID || (db.users[id] && (db.users[id].nodeId || 'primary') === nodeId)) }, nodeId)]);
     return { online: true, disk: d, usage: us };
   } catch (e) {
     return { online: false, disk: { total: 0, free: 0 }, usage: {}, error: e.message };
@@ -356,7 +356,7 @@ async function checkAllocation(excludeId, quota) {
 function publicUser(u, usage) {
   const us = (usage && usage[u.id]) || { used: 0, trash: 0 };
   return {
-    id: u.id, role: u.role, active: !!u.active, quota: u.quota == null ? null : u.quota,
+    id: u.id, nodeId: u.nodeId || 'primary', role: u.role, active: !!u.active, quota: u.quota == null ? null : u.quota,
     perms: u.role === 'admin' ? { ...ALL_PERMS } : { ...u.perms },
     used: us.used, trash: us.trash, createdAt: u.createdAt, lastLogin: u.lastLogin || null,
   };
@@ -366,6 +366,31 @@ function mustManage(ctx, target, newRole) {
     if (ctx.role !== 'owner') throw httpError(403, 'Hanya owner yang boleh mengelola akun admin.');
   }
 }
+
+admin.get('/nodes', wrap(async (req, res) => {
+  const nodes = await Promise.all(Object.values(db.nodes).map(async (n) => {
+    const pc = await pcNumbers(n.id);
+    return { id: n.id, name: n.name, primary: !!n.primary, online: pc.online, diskTotal: pc.disk.total, diskFree: pc.disk.free, accounts: Object.values(db.users).filter((u) => (u.nodeId || 'primary') === n.id).length };
+  }));
+  res.json({ nodes });
+}));
+
+admin.post('/nodes', wrap(async (req, res) => {
+  if (req.ctx.role !== 'owner') throw httpError(403, 'Hanya owner yang boleh menambahkan storage node.');
+  const b = req.body || {};
+  const id = String(b.id || '').trim().toLowerCase();
+  const name = String(b.name || '').trim();
+  const url = String(b.url || '').trim().replace(/\/+$/, '');
+  const token = String(b.token || '');
+  if (!/^[a-z0-9][a-z0-9_-]{1,30}$/.test(id) || id === 'primary' || db.nodes[id]) throw httpError(400, 'ID node tidak valid atau sudah digunakan.');
+  if (!name || name.length > 80) throw httpError(400, 'Nama storage wajib diisi (maksimal 80 karakter).');
+  let parsed;
+  try { parsed = new URL(url); } catch { throw httpError(400, 'URL storage tidak valid.'); }
+  if (!['http:', 'https:'].includes(parsed.protocol) || token.length < 24) throw httpError(400, 'URL harus HTTP(S) dan token minimal 24 karakter.');
+  db.nodes[id] = { id, name, url, token, primary: false, createdAt: Date.now() };
+  await saveDb();
+  res.status(201).json({ id, name, primary: false });
+}));
 
 admin.get('/overview', wrap(async (req, res) => res.json(overviewFrom(await pcNumbers()))));
 
@@ -385,6 +410,8 @@ admin.post('/users', wrap(async (req, res) => {
   }
   const role = b.role === 'admin' ? 'admin' : 'user';
   mustManage(req.ctx, null, role);
+  const nodeId = String(b.nodeId || 'primary');
+  if (!db.nodes[nodeId]) throw httpError(400, 'Storage node tidak ditemukan.');
   acc.checkPassword(b.password);
   const quota = acc.parseQuota(b.quota, role);
   const perms = acc.normPerms(b.perms);
@@ -393,9 +420,9 @@ admin.post('/users', wrap(async (req, res) => {
   await checkAllocation(null, quota);
   if (db.users[id]) throw httpError(409, 'Username sudah dipakai.');
   const now = Date.now();
-  db.users[id] = { id, role, active: b.active === false ? false : true, quota, perms, pw, tv: 1, createdAt: now, updatedAt: now };
+  db.users[id] = { id, nodeId, role, active: b.active === false ? false : true, quota, perms, pw, tv: 1, createdAt: now, updatedAt: now };
   await saveDb();
-  await agentCall('POST', `/sys/users/${id}/init`, {}).catch(() => {}); // best effort; the folder is also created lazily on first use
+  await agentCall('POST', `/sys/users/${id}/init`, {}, nodeId).catch(() => {}); // best effort; the folder is also created lazily on first use
   res.status(201).json(publicUser(db.users[id], null));
 }));
 
@@ -413,9 +440,17 @@ admin.patch('/users/:id', wrap(async (req, res) => {
   let pw = null;
   if (b.password !== undefined && b.password !== '') { acc.checkPassword(b.password); pw = await acc.hashPw(b.password); }
   const active = 'active' in b ? !!b.active : u.active;
+  const nextNodeId = 'nodeId' in b ? String(b.nodeId || 'primary') : (u.nodeId || 'primary');
+  if (!db.nodes[nextNodeId]) throw httpError(400, 'Storage node tidak ditemukan.');
+  if (nextNodeId !== (u.nodeId || 'primary')) {
+    const sourceUsage = await agentCall('POST', '/sys/usage', { ids: [id] }, u.nodeId || 'primary').catch(() => null);
+    const used = sourceUsage && sourceUsage[id] ? sourceUsage[id].used : 0;
+    if (used > 0) throw httpError(409, 'Akun masih memiliki data. Pemindahan storage memerlukan migrasi data terverifikasi; penempatan tidak diubah agar file tetap aman.');
+    await agentCall('POST', `/sys/users/${id}/init`, {}, nextNodeId);
+  }
   if (quota !== (u.quota == null ? null : u.quota)) await checkAllocation(id, quota);
 
-  u.role = newRole; u.quota = quota; u.perms = perms; u.updatedAt = Date.now();
+  u.role = newRole; u.quota = quota; u.perms = perms; u.nodeId = nextNodeId; u.updatedAt = Date.now();
   if (pw) { u.pw = pw; u.tv = (u.tv || 1) + 1; }
   if (active !== u.active) { u.active = active; u.tv = (u.tv || 1) + 1; } // any status change ends old sessions
   await saveDb();
@@ -428,7 +463,7 @@ admin.delete('/users/:id', wrap(async (req, res) => {
   if (!u) throw httpError(404, 'Pengguna tidak ditemukan.');
   mustManage(req.ctx, u, null);
   // the PC archives the folder first; if the PC is off we refuse so no data is left orphaned
-  const r = await agentCall('POST', `/sys/users/${id}/archive`, {});
+  const r = await agentCall('POST', `/sys/users/${id}/archive`, {}, u.nodeId || 'primary');
   delete db.users[id];
   await saveDb();
   res.json({ ok: true, archived: r.archived || null });
