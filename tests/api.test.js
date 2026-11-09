@@ -218,6 +218,23 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('create bob (read-only) is 201', r.status === 201, r.status);
     r = await mk(own, { username: 'carol', password: 'carol-pass-1', quota: 2 * MB, perms: { upload: true, modify: true, delete: true, share: true } });
     check('create carol (can share) is 201', r.status === 201, r.status);
+
+    r = await own.post('admin/nodes', { id: 'secondary', name: 'Storage secondary', url: A, token: stack.token });
+    check('owner can register a secondary storage node', r.status === 201, r.status);
+    r = await mk(own, { username: 'nodeuser', password: 'nodeuser-pass', quota: 2 * MB, nodeId: 'secondary' });
+    check('new account can be assigned to secondary storage', r.status === 201 && (await r.json()).nodeId === 'secondary', r.status);
+    const nodeUser = client(B);
+    await nodeUser.login('nodeuser', 'nodeuser-pass');
+    u = await nodeUser.upload('node-file.txt', 'stored on secondary');
+    check('account file requests route to the assigned node', u.status === 200 && fs.readFileSync(path.join(S, 'users', 'nodeuser', 'node-file.txt'), 'utf8') === 'stored on secondary', JSON.stringify(u));
+    r = await own.send('PATCH', '/api/admin/users/nodeuser', { nodeId: 'primary' });
+    check('reassignment with existing data is rejected safely (409)', r.status === 409, r.status);
+    r = await own.get('/api/admin/nodes');
+    d = await r.json();
+    check('admin node inventory reports per-node account counts', r.status === 200 && d.nodes.some((n) => n.id === 'secondary' && n.accounts === 1), JSON.stringify(d.nodes));
+    r = await own.send('DELETE', '/api/admin/users/nodeuser');
+    check('delete archives account data from its assigned node', r.status === 200 && !fs.existsSync(path.join(S, 'users', 'nodeuser')), r.status);
+
     r = await own.get('/api/admin/users');
     d = await r.json();
     check('user list has 3 accounts, no password material', d.users.length === 3 && !JSON.stringify(d).includes('scrypt') && !JSON.stringify(d).includes('"pw"'), JSON.stringify(d).slice(0, 200));
