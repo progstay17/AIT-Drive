@@ -103,6 +103,13 @@ const json = (r) => r.json();
     check('owner can revoke another account token from admin API', r.status === 200, r.status);
     r = await fetch(stack.webUrl + '/api/list', { headers: bearer(adminRevokeData.token) });
     check('owner-revoked token is rejected immediately', r.status === 401, r.status);
+    r = await user.send('POST', '/api/tokens', { label: 'self revoke test', scopes: ['read'], expiresInDays: 30 });
+    const selfRevokeData = await json(r);
+    check('create PAT for self-revocation test', r.status === 201, r.status);
+    r = await fetch(stack.webUrl + '/api/token/revoke-self', { method: 'POST', headers: bearer(selfRevokeData.token) });
+    check('PAT can revoke only itself without browser session', r.status === 200, r.status);
+    r = await fetch(stack.webUrl + '/api/list', { headers: bearer(selfRevokeData.token) });
+    check('self-revoked PAT is rejected on the next request', r.status === 401, r.status);
     r = await user.send('POST', '/api/tokens', { label: 'illegal share', scopes: ['share'], expiresInDays: 30 });
     check('cannot mint a scope the account does not possess', r.status === 403, r.status);
 
