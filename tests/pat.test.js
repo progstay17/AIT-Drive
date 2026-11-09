@@ -31,7 +31,17 @@ const json = (r) => r.json();
   const owner = cookieClient(stack.webUrl);
   try {
     await owner.login(stack.creds.user, stack.creds.pass);
-    let r = await owner.send('POST', '/api/admin/users', {
+    let r = await owner.send('POST', '/api/tokens', {
+      label: 'owner automation', scopes: ['read', 'upload', 'modify', 'delete', 'share'], expiresInDays: 30,
+    });
+    const ownerTokenData = await json(r);
+    check('owner can mint a scoped file PAT', r.status === 201, r.status);
+    r = await fetch(stack.webUrl + '/api/admin/users', { headers: bearer(ownerTokenData.token) });
+    check('owner PAT is restricted to file-client role and cannot access admin APIs', r.status === 403, r.status);
+    r = await fetch(stack.webUrl + '/api/list', { headers: bearer(ownerTokenData.token) });
+    check('owner PAT still accesses owner drive files', r.status === 200, r.status);
+
+    r = await owner.send('POST', '/api/admin/users', {
       username: 'patuser', password: 'patuser-pass', quota: 8 * 1024 * 1024,
       perms: { upload: true, modify: true, delete: true, share: false },
     });
