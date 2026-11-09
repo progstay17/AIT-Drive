@@ -39,7 +39,7 @@ const json = (r) => r.json();
     const user = cookieClient(stack.webUrl);
     await user.login('patuser', 'patuser-pass');
 
-    r = await user.send('POST', '/api/tokens', { label: 'read only', scopes: ['read'], expiresInDays: 30 }, { 'X-Requested-With': undefined });
+    r = await user.send('POST', '/api/tokens', { label: 'read only', scopes: ['read'], expiresInDays: 30 }, { 'X-Requested-With': '' });
     check('token management keeps cookie CSRF protection', r.status === 403, r.status);
 
     r = await user.send('POST', '/api/tokens', { label: 'read only', scopes: ['read'], expiresInDays: 30 });
