@@ -100,6 +100,31 @@ function resolveCtx(sess) {
   if (String(u.tv) !== String(sess.tv)) return { status: 401, error: 'Sesi tidak berlaku lagi. Silakan masuk lagi.' };
   return { ctx: { id: u.id, name: u.id, role: u.role, nodeId: u.nodeId || 'primary', quota: u.quota == null ? null : u.quota, perms: u.role === 'admin' ? { ...ALL_PERMS } : { ...u.perms } } };
 }
+
+const TOKEN_SCOPES = new Set(['read', 'upload', 'modify', 'delete', 'share']);
+function resolvePat(value) {
+  const match = /^aitd_([A-Za-z0-9_-]{12})\.([A-Za-z0-9_-]{43})$/.exec(value);
+  if (!match) return { status: 401, error: 'Token tidak valid.' };
+  const [, id, secret] = match;
+  const record = db.tokens[id];
+  if (!record || record.revokedAt || (record.expiresAt && record.expiresAt <= Date.now())) return { status: 401, error: 'Token tidak valid atau sudah kedaluwarsa.' };
+  const digest = crypto.createHash('sha256').update(secret).digest();
+  const stored = Buffer.from(String(record.hash || ''), 'hex');
+  if (stored.length !== digest.length || !crypto.timingSafeEqual(stored, digest)) return { status: 401, error: 'Token tidak valid.' };
+
+  let account;
+  if (record.accountId === OWNER_ID) {
+    account = { id: OWNER_ID, name: ADMIN_USER, role: 'owner', nodeId: 'primary', quota: null, perms: { ...ALL_PERMS } };
+  } else {
+    const u = USER_RE.test(String(record.accountId)) ? db.users[record.accountId] : null;
+    if (!u) return { status: 401, error: 'Akun token tidak ditemukan.' };
+    if (!u.active) return { status: 403, error: 'Akun dinonaktifkan. Hubungi admin.' };
+    account = { id: u.id, name: u.id, role: 'user', nodeId: u.nodeId || 'primary', quota: u.quota == null ? null : u.quota, perms: u.role === 'admin' ? { ...ALL_PERMS } : { ...u.perms } };
+  }
+  const perms = {};
+  for (const key of Object.keys(ALL_PERMS)) perms[key] = !!account.perms[key] && record.scopes.includes(key);
+  return { ctx: { ...account, perms }, record };
+}
 // what the agent needs to know about the caller (the agent trusts only the shared AGENT_TOKEN)
 function userHeaders(c) {
   return {
@@ -252,17 +277,44 @@ app.post('/auth/logout', (req, res) => {
 app.get('/auth/me', (req, res) => res.json({ authenticated: !!sessionOf(req) }));
 
 function requireAuth(req, res, next) {
-  const s = sessionOf(req);
-  if (!s) return res.status(401).json({ error: 'unauthenticated' });
-  // CSRF: state-changing requests must carry a custom header (cannot be set cross-site without CORS)
+  // An Authorization header is authoritative: never fall back to a browser cookie if it is malformed or invalid.
+  if (req.headers.authorization !== undefined) {
+    const match = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization));
+    if (!match) return res.status(401).json({ error: 'unauthenticated' });
+    const r = resolvePat(match[1]);
+    if (!r.ctx) return res.status(r.status).json({ error: r.error });
+    req.authType = 'pat';
+    req.tokenRecord = r.record;
+    req.ctx = r.ctx;
+    return next();
+  }
+  const sess = sessionOf(req);
+  if (!sess) return res.status(401).json({ error: 'unauthenticated' });
+  // CSRF protection remains mandatory for cookie-authenticated state changes.
   if (req.method !== 'GET' && req.headers['x-requested-with'] !== 'drive') {
     return res.status(403).json({ error: 'forbidden' });
   }
-  const r = resolveCtx(s);
+  const r = resolveCtx(sess);
   if (!r.ctx) return res.status(r.status).json({ error: r.error });
-  req.sess = s;
+  req.authType = 'session';
+  req.sess = sess;
   req.ctx = r.ctx;
   next();
+}
+function requireSessionAuth(req, res, next) {
+  if (req.authType !== 'session') return res.status(403).json({ error: 'Gunakan sesi browser untuk mengelola personal access token.' });
+  next();
+}
+function requireScope(scope) {
+  return (req, res, next) => {
+    if (req.authType === 'pat' && scope !== 'read' && !req.tokenRecord.scopes.includes(scope)) {
+      return res.status(403).json({ error: 'Token tidak memiliki scope ' + scope + '.' });
+    }
+    if (req.authType === 'pat' && scope === 'read' && !req.tokenRecord.scopes.includes('read')) {
+      return res.status(403).json({ error: 'Token tidak memiliki scope read.' });
+    }
+    next();
+  };
 }
 
 // ---------- API ----------
@@ -274,15 +326,53 @@ const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
   res.status(e.status || 500).json({ error: e.status ? e.message : 'internal error' });
 });
 
-api.get('/status', async (req, res) => {
+api.get('/tokens', requireSessionAuth, (req, res) => {
+  const tokens = Object.values(db.tokens).filter((t) => t.accountId === req.ctx.id)
+    .map(({ id, label, scopes, createdAt, expiresAt, revokedAt }) => ({ id, label, scopes, createdAt, expiresAt, revokedAt: revokedAt || null }));
+  tokens.sort((a, b) => b.createdAt - a.createdAt);
+  res.json({ tokens });
+});
+api.post('/tokens', requireSessionAuth, json1, wrap(async (req, res) => {
+  const body = req.body || {};
+  const label = typeof body.label === 'string' ? body.label.trim() : '';
+  if (!label || label.length > 80) throw httpError(400, 'Nama token wajib diisi (maksimal 80 karakter).');
+  const requested = body.scopes === undefined ? ['read'] : body.scopes;
+  if (!Array.isArray(requested) || requested.some((x) => typeof x !== 'string' || !TOKEN_SCOPES.has(x))) throw httpError(400, 'Daftar scope token tidak valid.');
+  const scopes = [...new Set(['read', ...requested])];
+  for (const scope of scopes) {
+    if (scope !== 'read' && !req.ctx.perms[scope]) throw httpError(403, 'Akun tidak memiliki izin ' + scope + '.');
+  }
+  const days = body.expiresInDays === undefined ? 365 : Number(body.expiresInDays);
+  if (!Number.isInteger(days) || days < 1 || days > 3650) throw httpError(400, 'Masa berlaku token harus 1–3650 hari.');
+  const id = b64u(crypto.randomBytes(9));
+  const secret = b64u(crypto.randomBytes(32));
+  const token = 'aitd_' + id + '.' + secret;
+  const now = Date.now();
+  db.tokens[id] = {
+    id, accountId: req.ctx.id, label, scopes,
+    hash: crypto.createHash('sha256').update(secret).digest('hex'),
+    createdAt: now, expiresAt: now + days * 86400000,
+  };
+  await saveDb();
+  res.status(201).json({ id, label, token, scopes, createdAt: now, expiresAt: db.tokens[id].expiresAt });
+}));
+api.delete('/tokens/:id', requireSessionAuth, wrap(async (req, res) => {
+  const record = db.tokens[String(req.params.id || '')];
+  if (!record || record.accountId !== req.ctx.id) throw httpError(404, 'Token tidak ditemukan.');
+  delete db.tokens[record.id];
+  await saveDb();
+  res.json({ ok: true });
+}));
+
+api.get('/status', requireScope('read'), async (req, res) => {
   try { const r = await agentJson('GET', '/health', req.ctx, undefined, 4000); res.json({ agent: !!(r.json && r.json.ok) }); }
   catch { res.json({ agent: false }); }
 });
-api.get('/me', (req, res) => {
+api.get('/me', requireScope('read'), (req, res) => {
   const c = req.ctx;
   res.json({ id: c.id, name: c.name, role: c.role, quota: c.quota, perms: c.perms, canAdmin: c.role !== 'user', canChangePassword: c.role !== 'owner' });
 });
-api.post('/me/password', json1, wrap(async (req, res) => {
+api.post('/me/password', requireSessionAuth, json1, wrap(async (req, res) => {
   const c = req.ctx;
   if (c.role === 'owner') throw httpError(400, 'Password owner diubah lewat ADMIN_PASSWORD di server.');
   const { current, next } = req.body || {};
@@ -296,21 +386,22 @@ api.post('/me/password', json1, wrap(async (req, res) => {
   res.json({ ok: true, relogin: true });
 }));
 
-api.get('/list', (req, res) => proxy(req, res, req.ctx, '/list', { path: req.query.path || '' }));
-api.get('/stats', (req, res) => proxy(req, res, req.ctx, '/stats'));
-api.get('/search', (req, res) => proxy(req, res, req.ctx, '/search', { q: req.query.q || '' }));
-api.get('/download', (req, res) => {
+api.get('/list', requireScope('read'), (req, res) => proxy(req, res, req.ctx, '/list', { path: req.query.path || '' }));
+api.get('/stats', requireScope('read'), (req, res) => proxy(req, res, req.ctx, '/stats'));
+api.get('/search', requireScope('read'), (req, res) => proxy(req, res, req.ctx, '/search', { q: req.query.q || '' }));
+api.get('/download', requireScope('read'), (req, res) => {
   const q = { path: req.query.path || '' };
   if (req.query.inline === '1') q.inline = '1';
   proxy(req, res, req.ctx, '/download', q);
 });
-api.post('/upload', (req, res) => proxy(req, res, req.ctx, '/upload', { path: req.query.path || '' }));
-for (const op of ['mkdir', 'rename', 'move', 'delete']) {
-  api.post('/' + op, json1, (req, res) => sendJson(req, res, 'POST', '/' + op, req.body));
+api.post('/upload', requireScope('upload'), (req, res) => proxy(req, res, req.ctx, '/upload', { path: req.query.path || '' }));
+for (const op of ['mkdir', 'rename', 'move']) {
+  api.post('/' + op, requireScope('modify'), json1, (req, res) => sendJson(req, res, 'POST', '/' + op, req.body));
 }
-api.get('/trash', (req, res) => proxy(req, res, req.ctx, '/trash'));
-api.post('/trash/restore', json1, (req, res) => sendJson(req, res, 'POST', '/trash/restore', req.body));
-api.post('/trash/empty', json1, (req, res) => sendJson(req, res, 'POST', '/trash/empty', {}));
+api.post('/delete', requireScope('delete'), json1, (req, res) => sendJson(req, res, 'POST', '/delete', req.body));
+api.get('/trash', requireScope('read'), (req, res) => proxy(req, res, req.ctx, '/trash'));
+api.post('/trash/restore', requireScope('delete'), json1, (req, res) => sendJson(req, res, 'POST', '/trash/restore', req.body));
+api.post('/trash/empty', requireScope('delete'), json1, (req, res) => sendJson(req, res, 'POST', '/trash/empty', {}));
 
 // ---------- admin panel (owner and admins) ----------
 const admin = express.Router();
@@ -476,12 +567,13 @@ admin.delete('/users/:id', wrap(async (req, res) => {
 api.use('/admin', admin);
 
 // share links: signed, expiring, read-only download of one file, tied to the account that made it
-api.post('/share', json1, (req, res) => {
+api.post('/share', requireScope('share'), json1, (req, res) => {
   const p = String((req.body || {}).path || '');
   const days = Math.min(Math.max(parseInt((req.body || {}).days || '7', 10) || 7, 1), 30);
   if (!p) return res.status(400).json({ error: 'path required' });
   if (!req.ctx.perms.share) return res.status(403).json({ error: 'Akun kamu tidak punya izin untuk membagikan link.' });
-  const token = makeToken({ k: 'share', p, u: req.sess.u, tv: req.sess.tv, o: req.sess.o ? 1 : 0, exp: Date.now() + days * 86400000 });
+  const account = req.ctx.id === OWNER_ID ? null : db.users[req.ctx.id];
+  const token = makeToken({ k: 'share', p, u: req.ctx.id, tv: account ? account.tv : undefined, o: req.ctx.id === OWNER_ID ? 1 : 0, exp: Date.now() + days * 86400000 });
   res.json({ url: `${req.protocol}://${req.get('host')}/s/${token}`, days });
 });
 app.use('/api', api);
