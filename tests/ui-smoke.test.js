@@ -102,7 +102,8 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
 
     // ---- selection
     nodeFor('notes.txt').dispatchEvent(ev('click'));
-    check('single click selects', nodeFor('notes.txt').getAttribute('aria-selected') === 'true' && nodeFor('notes.txt').classList.contains('is-selected'));
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    check('single click selects after double-click window', nodeFor('notes.txt').getAttribute('aria-selected') === 'true' && nodeFor('notes.txt').classList.contains('is-selected'));
     check('selection checkbox is visible in the item DOM', !!nodeFor('notes.txt').querySelector('.selection-check'));
     check('selection toolbar appears with item count and actions', !!$('selection-toolbar') && $('selection-toolbar').textContent.includes('1 dipilih') && [...$('selection-toolbar').querySelectorAll('button')].some((b) => b.textContent === 'Unduh'));
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }));
@@ -185,6 +186,7 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
 
     // ---- delete with confirmation (Delete key)
     nodeFor('upload.txt').dispatchEvent(ev('click'));
+    await new Promise((resolve) => setTimeout(resolve, 260));
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
     await waitFor(() => d.querySelector('.modal-backdrop'), 2000, 'delete confirm');
     check('Delete key asks for confirmation (danger button)', !!d.querySelector('.modal-backdrop .btn-danger-solid'));

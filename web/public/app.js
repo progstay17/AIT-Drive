@@ -15,6 +15,7 @@
   let selected = new Set();
   let lastIndex = -1;
   let suppressClickUntil = 0;
+  let itemClickTimer = null;
   let me = null;          // { id, name, role, quota, perms, canAdmin, canChangePassword }
   let adminMode = false;
   let lastStats = null;
@@ -526,9 +527,14 @@
     node.title = it.name;
     node.addEventListener('click', (e) => {
       if (Date.now() < suppressClickUntil) return;
-      select(i, e);
+      clearTimeout(itemClickTimer);
+      itemClickTimer = setTimeout(() => select(i, e), 240);
     });
-    node.addEventListener('dblclick', () => openItem(it));
+    node.addEventListener('dblclick', () => {
+      clearTimeout(itemClickTimer);
+      itemClickTimer = null;
+      openItem(it);
+    });
     node.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); openItem(it); }
       else if (e.key === ' ') { e.preventDefault(); select(i, e); }
