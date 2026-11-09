@@ -331,6 +331,13 @@ const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
   res.status(e.status || 500).json({ error: e.status ? e.message : 'internal error' });
 });
 
+api.post('/token/revoke-self', wrap(async (req, res) => {
+  if (req.authType !== 'pat' || !req.tokenRecord) throw httpError(403, 'Endpoint ini hanya untuk mencabut PAT yang sedang digunakan.');
+  delete db.tokens[req.tokenRecord.id];
+  await saveDb();
+  res.json({ ok: true });
+}));
+
 api.get('/tokens', requireSessionAuth, (req, res) => {
   const tokens = Object.values(db.tokens).filter((t) => t.accountId === req.ctx.id)
     .map(({ id, label, scopes, createdAt, expiresAt, revokedAt }) => ({ id, label, scopes, createdAt, expiresAt, revokedAt: revokedAt || null }));
