@@ -487,3 +487,39 @@ select.input { appearance: auto; }
   .toast { transition: none !important; }
   .modal-backdrop { backdrop-filter: none; }
 }
+
+/* Folder destination browser */
+.folder-picker-modal { width: min(100%, 560px); }
+.folder-picker-help { margin: 5px 0 0; font-size: 12px; }
+.folder-picker { display: grid; gap: 12px; }
+.folder-picker-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); }
+.folder-crumb { border: 0; padding: 3px 5px; border-radius: 5px; background: transparent; color: var(--accent-ink); cursor: pointer; font-weight: 600; }
+.folder-crumb:disabled { color: var(--ink); cursor: default; }
+.folder-picker-status { margin: 0; min-height: 20px; font-size: 12px; }
+.folder-picker-list { display: grid; gap: 4px; max-height: min(42dvh, 320px); overflow: auto; overscroll-behavior: contain; }
+.folder-picker-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 9px 11px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.folder-picker-item:hover, .folder-picker-item:focus-visible { background: var(--surface-hover); border-color: var(--line); }
+.folder-picker-icon { color: var(--accent); flex: none; }
+.folder-picker-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.folder-picker-arrow { color: var(--ink-3); flex: none; }
+.folder-picker-actions { position: sticky; bottom: 0; padding-top: 10px; background: var(--surface); }
+@media (max-width: 680px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .stat-card { min-width: 0; padding: 13px; }
+  .stat-value { font-size: 20px; }
+  .stat-sub { overflow-wrap: anywhere; }
+  .admin-bar { align-items: stretch; }
+  .admin-bar .btn { width: 100%; }
+  .admin-table { min-width: 0; width: 100%; table-layout: fixed; }
+  .admin-table thead { display: none; }
+  .admin-table, .admin-table tbody, .admin-table tr, .admin-table td { display: block; }
+  .admin-table tr.admin-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 12px; padding: 12px; border-bottom: 1px solid var(--line); }
+  .admin-row td { min-width: 0; padding: 6px 0; border: 0; overflow-wrap: anywhere; }
+  .admin-row td:first-child { grid-column: 1 / -1; }
+  .admin-table .col-quota { min-width: 0; }
+  .admin-row td:nth-child(3), .admin-row td:nth-child(4) { grid-column: span 1; }
+  .admin-row .col-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 7px; text-align: left; }
+  .col-actions .btn + .btn { margin-left: 0; }
+  .admin-row .badges { gap: 4px; }
+  .folder-picker-modal { width: 100%; }
+}

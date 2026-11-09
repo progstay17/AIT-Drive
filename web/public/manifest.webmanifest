@@ -1,0 +1,20 @@
+{
+  "name": "AIT Drive",
+  "short_name": "AIT Drive",
+  "description": "Penyimpanan file pribadi AIT",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0C1B2B",
+  "theme_color": "#0C1B2B",
+  "icons": [
+    {
+      "src": "/icons/ait-drive.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
