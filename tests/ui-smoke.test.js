@@ -181,7 +181,7 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
     await waitFor(() => fs.existsSync(path.join(S, 'upload.txt')), 6000, 'upload on disk');
     check('upload from the UI lands on disk', fs.readFileSync(path.join(S, 'upload.txt'), 'utf8') === 'uploaded via ui');
     await waitFor(() => names().includes('upload.txt'), 4000, 'list refresh after upload');
-    check('list refreshes after upload + success toast', /Selesai/.test(toasts()));
+    check('list refreshes after upload without a redundant toast', !/Mengunggah|Selesai/.test(toasts()) && [...d.querySelectorAll('.transfer-row')].some((n) => /upload.txt/.test(n.textContent) && /Selesai/.test(n.textContent)));
 
     // ---- delete with confirmation (Delete key)
     nodeFor('upload.txt').dispatchEvent(ev('click'));
