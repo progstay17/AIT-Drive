@@ -100,7 +100,7 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
     tokenForm.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
     await waitFor(() => d.querySelector('.token-secret-value')?.value.startsWith('aitd_'), 4000, 'one-time PAT secret');
     const generatedSecret = d.querySelector('.token-secret-value').value;
-    check('PAT modal creates and reveals a token exactly once', /^aitd_[A-Za-z0-9_-]{12}\\.[A-Za-z0-9_-]{43}$/.test(generatedSecret));
+    check('PAT modal creates and reveals a token exactly once', /^aitd_[A-Za-z0-9_-]{12}\.[A-Za-z0-9_-]{43}$/.test(generatedSecret));
     check('PAT appears in active token list without exposing secret there', d.querySelector('.token-list').textContent.includes('UI smoke test') && !d.querySelector('.token-list').textContent.includes(generatedSecret));
     d.querySelector('.token-secret-panel button').click();
     await waitFor(() => copied === generatedSecret, 2000, 'copy PAT secret');
