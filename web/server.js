@@ -111,6 +111,10 @@ function resolvePat(value) {
   const digest = crypto.createHash('sha256').update(secret).digest();
   const stored = Buffer.from(String(record.hash || ''), 'hex');
   if (stored.length !== digest.length || !crypto.timingSafeEqual(stored, digest)) return { status: 401, error: 'Token tidak valid.' };
+  if (!record.lastUsedAt || Date.now() - record.lastUsedAt > 60000) {
+    record.lastUsedAt = Date.now();
+    saveDb().catch((e) => console.error('saveDb failed', e));
+  }
 
   let account;
   if (record.accountId === OWNER_ID) {
@@ -486,6 +490,32 @@ admin.post('/nodes', wrap(async (req, res) => {
 }));
 
 admin.get('/overview', wrap(async (req, res) => res.json(overviewFrom(await pcNumbers()))));
+
+admin.get('/tokens', wrap(async (req, res) => {
+  if (req.ctx.role !== 'owner') throw httpError(403, 'Hanya owner yang boleh mengelola token semua akun.');
+  const tokens = Object.values(db.tokens).map((t) => {
+    const user = t.accountId === OWNER_ID ? null : db.users[t.accountId];
+    return {
+      id: t.id, accountId: t.accountId,
+      accountName: t.accountId === OWNER_ID ? ADMIN_USER : t.accountId,
+      accountActive: t.accountId === OWNER_ID ? true : !!(user && user.active),
+      label: t.label, scopes: t.scopes, createdAt: t.createdAt,
+      expiresAt: t.expiresAt || null, lastUsedAt: t.lastUsedAt || null,
+      revokedAt: t.revokedAt || null,
+    };
+  }).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  res.json({ tokens });
+}));
+
+admin.delete('/tokens/:id', wrap(async (req, res) => {
+  if (req.ctx.role !== 'owner') throw httpError(403, 'Hanya owner yang boleh mencabut token semua akun.');
+  const id = String(req.params.id || '');
+  const record = db.tokens[id];
+  if (!record) throw httpError(404, 'Token tidak ditemukan.');
+  delete db.tokens[id];
+  await saveDb();
+  res.json({ ok: true, accountId: record.accountId });
+}));
 
 admin.get('/users', wrap(async (req, res) => {
   const nodeIds = Object.keys(db.nodes);
