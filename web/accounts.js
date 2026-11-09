@@ -47,6 +47,8 @@ function openStore(dataDir) {
   } catch (e) {
     if (e.code !== 'ENOENT') { console.error(`Tidak bisa membaca ${file}: ${e.message}`); process.exit(1); }
   }
+  if (!db.tokens || typeof db.tokens !== 'object') db.tokens = {};
+  db.version = Math.max(4, Number(db.version) || 2);
   let chain = Promise.resolve();
   function save() {
     chain = chain.then(async () => {
