@@ -296,6 +296,8 @@ api.post('/upload', (req, res) => proxy(req, res, req.ctx, '/upload', { path: re
 for (const op of ['mkdir', 'rename', 'move', 'delete']) {
   api.post('/' + op, json1, (req, res) => sendJson(req, res, 'POST', '/' + op, req.body));
 }
+api.get('/trash', (req, res) => proxy(req, res, req.ctx, '/trash'));
+api.post('/trash/restore', json1, (req, res) => sendJson(req, res, 'POST', '/trash/restore', req.body));
 api.post('/trash/empty', json1, (req, res) => sendJson(req, res, 'POST', '/trash/empty', {}));
 
 // ---------- admin panel (owner and admins) ----------
