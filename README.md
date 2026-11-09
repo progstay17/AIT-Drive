@@ -30,12 +30,14 @@ Browser --HTTPS--> Coolify / Web Gateway
                     STORAGE_ROOT
 ```
 
-Token Agent hanya disimpan pada `agent.env` di storage PC dan environment variables gateway di Coolify. Browser tidak pernah menerima token tersebut.
+Token Agent hanya disimpan pada `agent.env` di storage PC dan konfigurasi privat gateway di volume `/data`. Browser tidak pernah menerima token tersebut. `AGENT_URL` dan `AGENT_TOKEN` tetap menjadi node `primary` sehingga deployment single-agent lama tetap kompatibel; node tambahan didaftarkan owner dari panel admin.
 
 ## Fitur web
 
 - Banyak akun tanpa signup terbuka; akun dibuat dari panel admin.
 - Kuota disk per akun dan izin upload, modify, delete, share.
+- Multi-storage node: satu PC Agent dapat menampung banyak akun; owner memilih storage untuk tiap akun dan memantau status/kapasitas per PC.
+- Upload folder rekursif dengan subfolder, download folder sebagai ZIP, tampilan Trash, dan restore ke lokasi asal.
 - File browser dengan grid/list, breadcrumb, pencarian, multi-select, drag-and-drop upload, progress, preview gambar/video/audio/PDF/teks.
 - Rename, move, soft-delete, trash, signed share links dengan kedaluwarsa.
 - Tema terang/gelap, layout responsif, sesi HttpOnly, CSRF guard, rate limit login.
@@ -86,7 +88,7 @@ COOKIE_SECURE=false
 3. Base Directory: `/web` (Dockerfile berada di folder `web/`).
 4. Exposed Port: `3000`.
 5. Pasang Persistent Storage ke `/data` untuk data akun, kuota, dan izin.
-6. Isi environment variables:
+6. Isi environment variables. Untuk instalasi multi-storage, `AGENT_URL` dan `AGENT_TOKEN` tetap menunjuk Agent utama; node tambahan dikonfigurasi dari panel admin setelah Agent/tunnel PC tambahan siap:
 
 | Variable | Nilai |
 |---|---|
@@ -152,6 +154,7 @@ Test harness memakai port acak, token acak, dan folder storage sementara; tidak 
 - Jangan bind Agent ke `0.0.0.0` untuk deployment publik. Gunakan tunnel dan HTTPS.
 - Pasang backup terpisah untuk `STORAGE_ROOT` pada PC dan persistent volume `/data` di Coolify.
 - Soft-delete bukan backup; empty trash menghapus file secara permanen.
+- Akun lama otomatis tetap berada di node `primary`. Akun baru dapat ditempatkan ke node pilihan. Pemindahan akun yang sudah berisi data saat ini ditolak sampai migrasi terverifikasi tersedia; jangan mengubah `nodeId` secara manual.
 
 Dokumentasi: [API](docs/API.md), [Architecture](docs/ARCHITECTURE.md), [Security](docs/SECURITY.md), [Deployment](docs/DEPLOYMENT.md), [Multi-user](docs/MULTI-USER.md), [Troubleshooting](docs/TROUBLESHOOTING.md).
 
