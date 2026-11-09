@@ -594,10 +594,10 @@
     if (list.length === 1) {
       const it = list[0];
       add(it.type === 'dir' ? 'Buka' : 'Pratinjau', () => openItem(it));
-      add(it.type === 'dir' ? 'Unduh folder (.zip)' : 'Unduh', () => { location.href = dlUrl(it.full); });
+      add(it.type === 'dir' ? 'Unduh folder (.zip)' : 'Unduh', () => startDownload(it));
       if (can('modify')) add('Ganti nama', () => rename(it));
       if (can('modify')) add('Pindahkan ke…', () => move(list));
-      if (it.type !== 'dir' && can('share')) add('Buat link berbagi', () => share(it));
+      if (can('share')) add(it.type === 'dir' ? 'Bagikan folder' : 'Buat link berbagi', () => share(it));
     } else if (can('modify')) {
       add('Pindahkan ke…', () => move(list));
     }
@@ -702,7 +702,8 @@
     refresh(); loadStats();
   }
   async function share(it) {
-    const days = await dialog({ title: 'Buat link berbagi', message: 'Link berlaku berapa hari? (1-30). Siapa pun yang punya link bisa mengunduh file ini.', input: true, value: '7', confirm: 'Buat link' });
+    const kind = it.type === 'dir' ? 'folder' : 'file';
+    const days = await dialog({ title: 'Bagikan ' + kind, message: 'Siapa pun yang memiliki link dapat ' + (it.type === 'dir' ? 'mengunduh folder ini sebagai ZIP beserta isinya' : 'mengunduh file ini') + '. Link berlaku 1–30 hari.', input: true, value: '7', confirm: 'Buat link' });
     if (!days) return;
     try {
       const d = await post('share', { path: it.full, days: parseInt(days, 10) || 7 });
@@ -761,10 +762,118 @@
       await uploadOne(file, dest, relativePath);
     }
   }
+  // ---------------------------------------------------------------- transfer manager
+  const transfers = [];
+  let transferPanel = null;
+  let transferButton = null;
+  const transferLabel = (t) => t.kind === 'upload' ? 'Unggah' : 'Unduh';
+  function ensureTransferUI() {
+    if (transferButton) return;
+    transferButton = el('button', 'btn btn-secondary btn-sm transfer-trigger', 'Transfer');
+    transferButton.type = 'button';
+    transferButton.setAttribute('aria-label', 'Buka pengelola transfer');
+    transferButton.onclick = () => {
+      ensureTransferPanel();
+      transferPanel.hidden = !transferPanel.hidden;
+      renderTransfers();
+    };
+    document.querySelector('.topbar-actions').insertBefore(transferButton, document.querySelector('.topbar-actions').firstChild);
+    ensureTransferPanel();
+  }
+  function ensureTransferPanel() {
+    if (transferPanel) return;
+    transferPanel = el('section', 'transfer-panel');
+    transferPanel.hidden = true;
+    transferPanel.setAttribute('aria-label', 'Pengelola transfer');
+    const head = el('div', 'transfer-head');
+    head.append(el('div', 'transfer-heading', 'Pengelola transfer'), el('button', 'btn btn-ghost btn-icon btn-sm', '×'));
+    head.lastChild.type = 'button'; head.lastChild.setAttribute('aria-label', 'Tutup pengelola transfer');
+    head.lastChild.onclick = () => { transferPanel.hidden = true; };
+    const summary = el('div', 'transfer-summary');
+    const list = el('div', 'transfer-list');
+    const foot = el('div', 'transfer-foot');
+    const clear = el('button', 'btn btn-ghost btn-sm', 'Bersihkan selesai'); clear.type = 'button';
+    clear.onclick = () => { for (let i = transfers.length - 1; i >= 0; i--) if (['done','error','cancelled'].includes(transfers[i].state)) transfers.splice(i, 1); renderTransfers(); };
+    foot.appendChild(clear);
+    transferPanel.append(head, summary, list, foot);
+    document.body.appendChild(transferPanel);
+  }
+  function addTransfer(kind, name, detail) {
+    ensureTransferUI();
+    const task = { id: Date.now() + Math.random(), kind, name, detail: detail || '', state: 'active', progress: 0, message: 'Menyiapkan…', xhr: null };
+    transfers.unshift(task);
+    renderTransfers();
+    transferPanel.hidden = false;
+    return task;
+  }
+  function updateTransfer(task, patch) {
+    Object.assign(task, patch);
+    renderTransfers();
+  }
+  function renderTransfers() {
+    if (!transferPanel) return;
+    const active = transfers.filter(t => t.state === 'active').length;
+    transferPanel.querySelector('.transfer-summary').textContent = active ? active + ' transfer sedang berjalan' : transfers.length + ' aktivitas';
+    const list = transferPanel.querySelector('.transfer-list');
+    list.replaceChildren();
+    if (!transfers.length) { list.appendChild(el('p', 'muted transfer-empty', 'Belum ada aktivitas transfer.')); return; }
+    for (const task of transfers.slice(0, 40)) {
+      const row = el('article', 'transfer-row');
+      const top = el('div', 'transfer-row-top');
+      const name = el('div', 'transfer-name', task.name);
+      const state = el('span', 'transfer-state transfer-' + task.state, task.state === 'active' ? task.progress + '%' : task.state === 'done' ? 'Selesai' : task.state === 'cancelled' ? 'Dibatalkan' : 'Gagal');
+      top.append(name, state);
+      const meta = el('div', 'transfer-meta', transferLabel(task) + (task.detail ? ' · ' + task.detail : '') + ' · ' + task.message);
+      const track = el('div', 'progress-track');
+      const fill = el('div', 'progress-value'); fill.style.setProperty('--progress', task.progress + '%'); track.appendChild(fill);
+      row.append(top, meta, track);
+      if (task.state === 'active' && task.xhr) {
+        const cancel = el('button', 'btn btn-ghost btn-sm transfer-cancel', 'Batalkan'); cancel.type = 'button';
+        cancel.onclick = () => task.xhr && task.xhr.abort();
+        row.appendChild(cancel);
+      } else if (task.state === 'error' && task.retry) {
+        const retry = el('button', 'btn btn-secondary btn-sm', 'Coba lagi'); retry.type = 'button'; retry.onclick = task.retry; row.appendChild(retry);
+      }
+      list.appendChild(row);
+    }
+  }
+  function startDownload(it, existingTask) {
+    const task = existingTask || addTransfer('download', it.name, it.type === 'dir' ? 'Folder ZIP' : fmtSize(it.size));
+    const x = new XMLHttpRequest(); task.xhr = x;
+    x.open('GET', dlUrl(it.full));
+    x.responseType = 'blob';
+    x.setRequestHeader('X-Requested-With', 'drive');
+    x.onprogress = (e) => {
+      if (!e.lengthComputable) { updateTransfer(task, { message: 'Mengunduh…' }); return; }
+      updateTransfer(task, { progress: Math.round(e.loaded / e.total * 100), message: fmtSize(e.loaded) + ' / ' + fmtSize(e.total) });
+    };
+    x.onload = () => {
+      task.xhr = null;
+      if (x.status >= 200 && x.status < 300) {
+        const blob = x.response;
+        const url = URL.createObjectURL(blob);
+        const a = el('a'); a.href = url; a.download = it.type === 'dir' ? it.name + '.zip' : it.name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        updateTransfer(task, { state: 'done', progress: 100, message: fmtSize(blob.size) });
+      } else {
+        let msg = 'Gagal mengunduh';
+        try { msg = JSON.parse(x.responseText).error || msg; } catch {}
+        updateTransfer(task, { state: 'error', message: msg });
+        task.retry = () => { task.state = 'active'; task.progress = 0; task.message = 'Mencoba ulang…'; startDownload(it, task); renderTransfers(); };
+      }
+    };
+    x.onerror = () => { task.xhr = null; updateTransfer(task, { state: 'error', message: 'Koneksi terputus' }); };
+    x.onabort = () => { task.xhr = null; updateTransfer(task, { state: 'cancelled', message: 'Dibatalkan' }); };
+    x.send();
+    return task;
+  }
+
   function uploadOne(file, dest, relativePath) {
     return new Promise((resolve) => {
+      const task = addTransfer('upload', file.name, relativePath || file.name);
       const t = toast({ kind: 'success', title: file.name, message: 'Mengunggah…', progress: true });
-      const x = new XMLHttpRequest();
+      const x = new XMLHttpRequest(); task.xhr = x;
       const fd = new FormData();
       fd.append('file', file, relativePath || file.webkitRelativePath || file.name);
       x.open('POST', '/api/upload?' + qs({ path: dest }));
@@ -772,15 +881,20 @@
       x.upload.onprogress = (e) => {
         if (!e.lengthComputable) return;
         const p = Math.round((e.loaded / e.total) * 100);
-        t.setProgress(p); t.update({ message: `Mengunggah… ${p}%` });
+        task.progress = p; task.message = fmtSize(e.loaded) + ' / ' + fmtSize(e.total);
+        t.setProgress(p); t.update({ message: 'Mengunggah… ' + p + '%' }); renderTransfers();
       };
       const failed = (msg) => {
+        task.xhr = null; updateTransfer(task, { state: 'error', message: msg });
         t.update({ kind: 'error', message: msg, hideProgress: true });
-        t.addAction('Coba lagi', () => { t.close(); uploadOne(file, dest); });
+        t.addAction('Coba lagi', () => { t.close(); uploadOne(file, dest, relativePath); });
+        task.retry = () => uploadOne(file, dest, relativePath);
         resolve(false);
       };
       x.onload = () => {
+        task.xhr = null;
         if (x.status >= 200 && x.status < 300) {
+          task.progress = 100; updateTransfer(task, { state: 'done', progress: 100, message: fmtSize(file.size) });
           t.setProgress(100); t.update({ message: 'Selesai' }); t.autoClose(3000);
           afterUpload(dest); resolve(true);
         } else {
@@ -791,6 +905,7 @@
         }
       };
       x.onerror = () => failed('Koneksi terputus');
+      x.onabort = () => { task.xhr = null; updateTransfer(task, { state: 'cancelled', message: 'Dibatalkan' }); t.update({ kind: 'warning', message: 'Dibatalkan', hideProgress: true }); resolve(false); };
       x.send(fd);
     });
   }
@@ -1015,6 +1130,7 @@
       return;
     }
     showApp();
+    ensureTransferUI();
     applyViewIcons();
     applyMe();
     route();

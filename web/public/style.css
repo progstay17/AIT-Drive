@@ -523,3 +523,38 @@ select.input { appearance: auto; }
   .admin-row .badges { gap: 4px; }
   .folder-picker-modal { width: 100%; }
 }
+
+
+/* Transfer manager — persistent task list, separate from transient notifications. */
+.topbar-actions { position: relative; }
+.transfer-trigger { white-space: nowrap; }
+.transfer-panel {
+  position: fixed; z-index: 85; top: 68px; right: 18px;
+  display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(430px, calc(100vw - 24px)); max-height: min(620px, calc(100dvh - 88px));
+  overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+  background: var(--surface); box-shadow: 0 18px 54px rgba(5, 19, 34, .24);
+}
+.transfer-panel[hidden] { display: none; }
+.transfer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; border-bottom: 1px solid var(--line); }
+.transfer-heading { font-size: 14px; font-weight: 700; letter-spacing: -.02em; }
+.transfer-summary { padding: 9px 15px; color: var(--ink-3); font: 11px/1.4 var(--font-mono); border-bottom: 1px solid var(--line); }
+.transfer-list { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 5px 14px; }
+.transfer-empty { margin: 18px 0; text-align: center; font-size: 12px; }
+.transfer-row { display: grid; gap: 7px; padding: 12px 1px; border-bottom: 1px solid var(--line); }
+.transfer-row:last-child { border-bottom: 0; }
+.transfer-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.transfer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 650; }
+.transfer-state { flex: none; color: var(--ink-3); font: 10px/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.transfer-done { color: var(--accent-ink); }
+.transfer-error { color: var(--danger); }
+.transfer-cancelled { color: var(--ink-3); }
+.transfer-meta { color: var(--ink-3); font-size: 11px; overflow-wrap: anywhere; }
+.transfer-row .progress-track { height: 4px; }
+.transfer-row .progress-value { background: var(--accent); }
+.transfer-cancel { justify-self: end; min-height: 26px; padding: 2px 8px; }
+.transfer-foot { display: flex; justify-content: flex-end; padding: 8px 13px; border-top: 1px solid var(--line); background: var(--surface-2); }
+@media (max-width: 680px) {
+  .transfer-panel { top: auto; right: 8px; bottom: 8px; width: calc(100vw - 16px); max-height: min(72dvh, 560px); }
+  .transfer-trigger { font-size: 11px; padding-inline: 9px; }
+}
