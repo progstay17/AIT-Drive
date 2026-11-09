@@ -106,6 +106,33 @@
           wrap.appendChild(tokenHead);
           const tokenNote = el('p', 'admin-note', 'Owner dapat mencabut token CLI/MCP milik akun mana pun. Secret token tidak pernah ditampilkan di panel ini.');
           wrap.appendChild(tokenNote);
+          const tokenAccounts = [...new Map(tokens.map((token) => [token.accountId, { id: token.accountId, name: token.accountName }])).values()];
+          for (const account of tokenAccounts) {
+            const accountBar = el('div', 'admin-bar');
+            accountBar.appendChild(el('strong', null, account.name));
+            const revokeAll = el('button', 'btn btn-danger btn-sm', 'Cabut semua token akun');
+            revokeAll.type = 'button';
+            revokeAll.onclick = async () => {
+              const count = tokens.filter((token) => token.accountId === account.id).length;
+              const yes = await h.dialog({
+                title: 'Cabut semua token akun?',
+                message: 'Semua ' + count + ' token milik akun ' + account.name + ' akan langsung kehilangan akses CLI/MCP.',
+                confirm: 'Cabut semua token', danger: true,
+              });
+              if (!yes) return;
+              revokeAll.disabled = true;
+              try {
+                const result = await h.send('DELETE', '/api/admin/tokens/account/' + encodeURIComponent(account.id));
+                h.ok('Semua token dicabut', account.name + ' · ' + result.revoked + ' token');
+                show();
+              } catch (e) {
+                revokeAll.disabled = false;
+                h.fail('Gagal mencabut token', e.message);
+              }
+            };
+            accountBar.appendChild(revokeAll);
+            wrap.appendChild(accountBar);
+          }
           if (!tokens.length) {
             wrap.appendChild(el('p', 'muted', 'Belum ada Personal Access Token.'));
           } else {
