@@ -777,7 +777,7 @@
       transferPanel.hidden = !transferPanel.hidden;
       renderTransfers();
     };
-    $('topbar-actions').insertBefore(transferButton, $('topbar-actions').firstChild);
+    document.querySelector('.topbar-actions').insertBefore(transferButton, document.querySelector('.topbar-actions').firstChild);
     ensureTransferPanel();
   }
   function ensureTransferPanel() {
