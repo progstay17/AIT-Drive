@@ -13,11 +13,27 @@ Ada dua API: **gateway** (yang dipakai UI dan browser) dan **agent** (internal, 
 | GET | `/auth/me` | — | 200 `{authenticated:boolean}` |
 
 Cookie `sid`: `HttpOnly; SameSite=Lax; Path=/` (+ `Secure` bila `COOKIE_SECURE=true`).
-Rate limit: 5 kegagalan per IP per 15 menit, lalu 429 (termasuk untuk password yang benar) sampai jendela habis.
+Rate limit login: 5 kegagalan per IP per 15 menit, lalu 429 sampai jendela habis.
+
+#### Personal Access Token (PAT)
+
+CLI dan MCP memakai `Authorization: Bearer <PAT>`; tidak memakai cookie browser. PAT dibuat, dilihat, dan dicabut hanya melalui sesi browser yang valid (semua permintaan perubahan tetap wajib `X-Requested-With: drive`).
+
+| Method | Path | Body | Keterangan |
+|---|---|---|---|
+| GET | `/api/tokens` | — | Daftar token milik akun saat ini; tidak pernah mengembalikan secret atau hash |
+| POST | `/api/tokens` | `{"label","scopes","expiresInDays"}` | 201 mengembalikan secret **satu kali** |
+| DELETE | `/api/tokens/:id` | — | Mencabut token milik akun saat ini |
+
+Scope yang didukung: `read`, `upload`, `modify`, `delete`, `share`. Scope `read` selalu ditambahkan. Scope lain harus sudah diizinkan oleh permission akun saat token dibuat; permission akun yang berubah kemudian tetap langsung berlaku. Masa berlaku default 365 hari, minimum 1 dan maksimum 3650 hari.
+
+Format token: `aitd_<id>.<secret>`. Gateway hanya menyimpan SHA-256 secret, bukan token utuh. Secret hanya ditampilkan saat pembuatan; simpan di secret manager/credential store lokal. Token yang kedaluwarsa, dicabut, atau milik akun nonaktif ditolak. Token tidak dapat mengelola token, mengganti password, atau mengakses endpoint admin. Jika header Authorization dikirim tetapi salah, Gateway tidak akan fallback ke cookie.
+
+Untuk PAT, permintaan non-GET tidak membutuhkan header CSRF karena autentikasinya memakai Bearer token; cookie browser tetap mengikuti aturan CSRF yang sama.
 
 ### File (`/api/*`)
 
-Semua wajib cookie `sid` yang valid (jika tidak: 401). Permintaan **selain GET** juga wajib header `X-Requested-With: drive` (jika tidak: 403).
+Semua endpoint menerima sesi cookie `sid` atau PAT Bearer yang valid. Permintaan cookie **selain GET** wajib header `X-Requested-With: drive`; PAT memakai scope yang diminta dan tidak membutuhkan header CSRF.
 
 | Method | Path | Parameter | Respons |
 |---|---|---|---|
