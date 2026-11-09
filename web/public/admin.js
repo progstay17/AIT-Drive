@@ -17,6 +17,7 @@
       let users = [];
       let nodes = [];
       let ov = null;
+      let tokens = [];
 
       const toGb = (b) => (b == null ? '' : String(Math.round((b / GB) * 100) / 100));
       const fromGb = (s) => {
@@ -41,8 +42,10 @@
         box.replaceChildren(el('p', 'muted', 'Memuat panel admin…'));
         h.setHeading('Panel Admin', 'Akun, kuota disk, dan izin');
         try {
-          const [o, u, n] = await Promise.all([h.api('/api/admin/overview'), h.api('/api/admin/users'), h.api('/api/admin/nodes')]);
-          ov = o; users = u.users; nodes = n.nodes;
+          const requests = [h.api('/api/admin/overview'), h.api('/api/admin/users'), h.api('/api/admin/nodes')];
+          if (h.me().role === 'owner') requests.push(h.api('/api/admin/tokens'));
+          const [o, u, n, tokenData] = await Promise.all(requests);
+          ov = o; users = u.users; nodes = n.nodes; tokens = tokenData ? tokenData.tokens : [];
           draw();
         } catch (e) {
           box.replaceChildren(el('p', 'form-error', e.message));
@@ -94,6 +97,62 @@
           wrap.appendChild(el('p', 'admin-note', 'Mode overbooking aktif: total kuota boleh melebihi kapasitas disk. Pastikan disk tidak penuh.'));
         } else {
           wrap.appendChild(el('p', 'admin-note', `Kuota hanyalah batas, bukan ruang yang dikunci di muka. Total kuota tidak boleh melebihi kapasitas disk. Sisa yang bisa dialokasikan: ${fmtSize(ov.unallocated)}.`));
+        }
+
+        if (h.me().role === 'owner') {
+          const tokenHead = el('div', 'admin-bar');
+          tokenHead.appendChild(el('h2', 'section-title', 'Personal Access Tokens'));
+          tokenHead.appendChild(el('span', 'eyebrow', tokens.length + ' token'));
+          wrap.appendChild(tokenHead);
+          const tokenNote = el('p', 'admin-note', 'Owner dapat mencabut token CLI/MCP milik akun mana pun. Secret token tidak pernah ditampilkan di panel ini.');
+          wrap.appendChild(tokenNote);
+          if (!tokens.length) {
+            wrap.appendChild(el('p', 'muted', 'Belum ada Personal Access Token.'));
+          } else {
+            const scroll = el('div', 'file-list-wrap');
+            const table = el('table', 'file-list admin-table');
+            const head = el('tr');
+            for (const label of ['Akun', 'Nama token', 'Scope', 'Dibuat', 'Terakhir digunakan', 'Status', '']) {
+              const th = el('th', null, label); th.scope = 'col'; head.appendChild(th);
+            }
+            const thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
+            const body = el('tbody');
+            for (const token of tokens) {
+              const tr = el('tr', 'file-row admin-row');
+              tr.append(
+                el('td', null, token.accountName),
+                el('td', null, token.label),
+                el('td', null, token.scopes.join(' · ')),
+                el('td', 'col-num', fmtDate(token.createdAt)),
+                el('td', 'col-num', token.lastUsedAt ? fmtDate(token.lastUsedAt) : 'Belum digunakan'),
+                el('td', null, !token.accountActive ? 'Akun nonaktif' : token.expiresAt && token.expiresAt <= Date.now() ? 'Kedaluwarsa' : 'Aktif')
+              );
+              const actions = el('td', 'col-actions');
+              const revoke = el('button', 'btn btn-danger btn-sm', 'Cabut akses');
+              revoke.type = 'button';
+              revoke.disabled = !token.accountActive || (token.expiresAt && token.expiresAt <= Date.now());
+              revoke.onclick = async () => {
+                const yes = await h.dialog({
+                  title: 'Cabut akses token?',
+                  message: 'Token ' + token.label + ' milik akun ' + token.accountName + ' akan langsung ditolak oleh Gateway. CLI/MCP yang menggunakannya kehilangan akses.',
+                  confirm: 'Cabut token', danger: true,
+                });
+                if (!yes) return;
+                revoke.disabled = true;
+                try {
+                  await h.send('DELETE', '/api/admin/tokens/' + encodeURIComponent(token.id));
+                  tokens = tokens.filter((item) => item.id !== token.id);
+                  h.ok('Token dicabut', token.accountName + ' · ' + token.label);
+                  show();
+                } catch (e) {
+                  revoke.disabled = false;
+                  h.fail('Gagal mencabut token', e.message);
+                }
+              };
+              actions.appendChild(revoke); tr.appendChild(actions); body.appendChild(tr);
+            }
+            table.appendChild(body); scroll.appendChild(table); wrap.appendChild(scroll);
+          }
         }
 
         const bar = el('div', 'admin-bar');
@@ -323,7 +382,7 @@
         });
       }
 
-      return { show, hide() { users = []; nodes = []; ov = null; } };
+      return { show, hide() { users = []; nodes = []; tokens = []; ov = null; } };
     },
   };
 })();
