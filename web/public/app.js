@@ -594,7 +594,7 @@
     if (list.length === 1) {
       const it = list[0];
       add(it.type === 'dir' ? 'Buka' : 'Pratinjau', () => openItem(it));
-      if (it.type !== 'dir') add('Unduh', () => { location.href = dlUrl(it.full); });
+      add(it.type === 'dir' ? 'Unduh folder (.zip)' : 'Unduh', () => { location.href = dlUrl(it.full); });
       if (can('modify')) add('Ganti nama', () => rename(it));
       if (can('modify')) add('Pindahkan ke…', () => move(list));
       if (it.type !== 'dir' && can('share')) add('Buat link berbagi', () => share(it));
@@ -750,20 +750,23 @@
   async function uploadFiles(files) {
     if (!can('upload')) return fail('Tidak diizinkan', 'Akun kamu tidak punya izin mengunggah.');
     const dest = cwd;
-    for (const f of files) {
-      if (lastStats && lastStats.free != null && f.size > lastStats.free) {
-        fail(f.name, `Kuota tidak cukup. Sisa ${fmtSize(lastStats.free)}, file ini ${fmtSize(f.size)}.`);
+    for (const entry of files) {
+      const file = entry && entry.file ? entry.file : entry;
+      const relativePath = entry && entry.file ? entry.path : (file.webkitRelativePath || file.name);
+      if (!file) continue;
+      if (lastStats && lastStats.free != null && file.size > lastStats.free) {
+        fail(file.name, `Kuota tidak cukup. Sisa ${fmtSize(lastStats.free)}, file ini ${fmtSize(file.size)}.`);
         continue;
       }
-      await uploadOne(f, dest);
+      await uploadOne(file, dest, relativePath);
     }
   }
-  function uploadOne(file, dest) {
+  function uploadOne(file, dest, relativePath) {
     return new Promise((resolve) => {
       const t = toast({ kind: 'success', title: file.name, message: 'Mengunggah…', progress: true });
       const x = new XMLHttpRequest();
       const fd = new FormData();
-      fd.append('file', file, file.webkitRelativePath || file.name);
+      fd.append('file', file, relativePath || file.webkitRelativePath || file.name);
       x.open('POST', '/api/upload?' + qs({ path: dest }));
       x.setRequestHeader('X-Requested-With', 'drive');
       x.upload.onprogress = (e) => {
@@ -798,20 +801,42 @@
   window.addEventListener('dragenter', (e) => { if (hasFiles(e) && !$('app-view').hidden) { dragDepth++; $('dropzone').hidden = false; } });
   window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $('dropzone').hidden = true; });
   window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
-  window.addEventListener('drop', (e) => {
+  function readDroppedEntry(entry, parent = '') {
+    if (entry.isFile) {
+      return new Promise((resolve) => entry.file(
+        (file) => resolve([{ file, path: parent + file.name }]),
+        () => resolve([])
+      ));
+    }
+    if (!entry.isDirectory) return Promise.resolve([]);
+    const reader = entry.createReader();
+    const readBatch = () => new Promise((resolve) => reader.readEntries(resolve, () => resolve([])));
+    return (async () => {
+      const out = [];
+      while (true) {
+        const batch = await readBatch();
+        if (!batch.length) break;
+        for (const child of batch) out.push(...await readDroppedEntry(child, parent + entry.name + '/'));
+      }
+      return out;
+    })();
+  }
+  window.addEventListener('drop', async (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
     dragDepth = 0; $('dropzone').hidden = true;
     if ($('app-view').hidden) return;
-    const files = []; let skipped = 0;
-    for (const it of e.dataTransfer.items) {
-      if (it.kind !== 'file') continue;
-      const entry = it.webkitGetAsEntry && it.webkitGetAsEntry();
-      if (entry && entry.isDirectory) { skipped++; continue; }
-      const f = it.getAsFile(); if (f) files.push(f);
+    const files = [];
+    for (const item of e.dataTransfer.items || []) {
+      if (item.kind !== 'file') continue;
+      const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+      if (entry) files.push(...await readDroppedEntry(entry));
+      else {
+        const file = item.getAsFile();
+        if (file) files.push({ file, path: file.name });
+      }
     }
-    if (skipped) fail('Folder dilewati', 'Unggah folder belum didukung. Unggah file-nya langsung.');
-    uploadFiles(files);
+    if (files.length) await uploadFiles(files);
   });
 
   // ---------------------------------------------------------------- status + storage
@@ -953,8 +978,16 @@
           restore.type = 'button';
           restore.onclick = async () => {
             restore.disabled = true;
-            try { await post('trash/restore', { id: item.id }); ok('Item dipulihkan', item.name); close(true); load(cwd); loadStats(); }
-            catch (e) { restore.disabled = false; fail('Gagal memulihkan', e.message); }
+            try {
+              const restored = await post('trash/restore', { id: item.id });
+              const restoredPath = restored.path || item.originalPath || '';
+              ok('Item dipulihkan', restoredPath ? `Lokasi: ${restoredPath}` : item.name);
+              close(true);
+              const destination = parentOf(restoredPath);
+              if (destination !== cwd || searching) nav(destination);
+              else load(cwd);
+              loadStats();
+            } catch (e) { restore.disabled = false; fail('Gagal memulihkan', e.message); }
           };
           row.append(info, restore); body.appendChild(row);
         }
