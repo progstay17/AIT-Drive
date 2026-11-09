@@ -34,11 +34,13 @@ if (SESSION_SECRET.length < 32) { console.error('SESSION_SECRET must be at least
 
 const { db, save: saveDb } = acc.openStore(DATA_DIR);
 const { httpError, USER_RE, RESERVED_RE, ALL_PERMS, fmtBytes } = acc;
+if (!db.nodes.primary) db.nodes.primary = { id: 'primary', name: 'Storage utama', url: AGENT_URL, token: AGENT_TOKEN, primary: true };
+function getNode(id) {
+  const node = db.nodes[String(id || 'primary')] || db.nodes.primary;
+  return node && node.url && node.token ? node : db.nodes.primary;
+}
+function nodeUrl(node) { return new URL(node.url); }
 
-const agent = new URL(AGENT_URL);
-const agentLib = agent.protocol === 'https:' ? https : http;
-const agentPort = agent.port || (agent.protocol === 'https:' ? 443 : 80);
-const agentBase = agent.pathname.replace(/\/$/, '');
 const MSG_OFFLINE = 'PC tidak terjangkau. Pastikan PC dan agent menyala.';
 const MSG_TOKEN = 'Token agent tidak cocok. Samakan AGENT_TOKEN di web dengan agent.env.';
 
@@ -122,10 +124,15 @@ app.use((req, res, next) => {
 // ---------- talking to the agent ----------
 function agentJson(method, agentPath, ctx, body, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
+    const node = getNode(ctx && ctx.nodeId);
+    const target = nodeUrl(node);
+    const lib = target.protocol === 'https:' ? https : http;
+    const port = target.port || (target.protocol === 'https:' ? 443 : 80);
+    const base = target.pathname.replace(/\/$/, '');
     const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
-    const headers = { Authorization: `Bearer ${AGENT_TOKEN}`, ...(ctx ? userHeaders(ctx) : {}) };
+    const headers = { Authorization: `Bearer ${node.token}`, ...(ctx ? userHeaders(ctx) : {}) };
     if (payload) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = payload.length; }
-    const r = agentLib.request({ protocol: agent.protocol, hostname: agent.hostname, port: agentPort, method, path: agentBase + agentPath, headers, timeout: timeoutMs }, (ur) => {
+    const r = lib.request({ protocol: target.protocol, hostname: target.hostname, port, method, path: base + agentPath, headers, timeout: timeoutMs }, (ur) => {
       let d = '';
       ur.on('data', (c) => (d += c));
       ur.on('end', () => {
@@ -155,12 +162,17 @@ const FWD_RES = ['content-type', 'content-length', 'content-range', 'accept-rang
 
 // stream a request/response through to the agent on behalf of an account
 function proxy(req, res, ctx, agentPath, query) {
+  const node = getNode(ctx && ctx.nodeId);
+  const target = nodeUrl(node);
+  const lib = target.protocol === 'https:' ? https : http;
+  const port = target.port || (target.protocol === 'https:' ? 443 : 80);
+  const base = target.pathname.replace(/\/$/, '');
   const qs = query && Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : '';
-  const headers = { Authorization: `Bearer ${AGENT_TOKEN}`, ...userHeaders(ctx) };
+  const headers = { Authorization: `Bearer ${node.token}`, ...userHeaders(ctx) };
   for (const h of FWD_REQ) if (req.headers[h]) headers[h] = req.headers[h];
-  const up = agentLib.request({
-    protocol: agent.protocol, hostname: agent.hostname, port: agentPort,
-    method: req.method, path: agentBase + agentPath + qs, headers, timeout: 0,
+  const up = lib.request({
+    protocol: target.protocol, hostname: target.hostname, port,
+    method: req.method, path: base + agentPath + qs, headers, timeout: 0,
   }, (ur) => {
     // 401 from the agent means the shared token is wrong (our misconfiguration)
     if (ur.statusCode === 401) {
