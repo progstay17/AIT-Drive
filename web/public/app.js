@@ -422,6 +422,31 @@
     updateSelection();
   }
 
+  function syncSelectionToolbar() {
+    const box = $('content');
+    const old = $('selection-toolbar');
+    if (old) old.remove();
+    if (!selected.size || adminMode || !items.length) return;
+    const list = selectedItems();
+    const bar = el('div', 'selection-toolbar');
+    bar.id = 'selection-toolbar';
+    bar.setAttribute('role', 'toolbar');
+    bar.setAttribute('aria-label', 'Aksi item terpilih');
+    const count = el('strong', 'selection-count', list.length + ' dipilih');
+    bar.appendChild(count);
+    const action = (label, fn, cls = 'btn btn-secondary btn-sm') => {
+      const b = el('button', cls, label); b.type = 'button'; b.onclick = fn; bar.appendChild(b); return b;
+    };
+    action('Pilih semua', () => { selected = new Set(items.map((it) => it.full)); updateSelection(); });
+    action('Buka', () => { if (list.length === 1) openItem(list[0]); }, 'btn btn-secondary btn-sm' + (list.length !== 1 ? ' is-hidden' : ''));
+    action('Unduh', () => { for (const it of list) startDownload(it); });
+    if (list.length === 1 && can('share')) action('Bagikan', () => share(list[0]));
+    if (can('modify')) action('Pindahkan', () => move(list));
+    if (can('delete')) action('Hapus', () => del(list), 'btn btn-danger-solid btn-sm');
+    action('Batal pilih', () => { selected.clear(); lastIndex = -1; updateSelection(); }, 'btn btn-ghost btn-sm');
+    box.insertBefore(bar, box.firstChild);
+  }
+
   const subText = (it) => (it.type === 'dir' ? 'Folder' : fmtSize(it.size)) + (searching ? ' · ' + (it.where || 'Drive Saya') : '');
 
   function buildGrid() {
@@ -442,6 +467,7 @@
       text.append(el('div', 'file-name', it.name), el('div', 'file-sub', subText(it)));
       meta.appendChild(text);
       card.append(thumb, meta);
+      addSelectionControl(card, i);
       bindItem(card, i);
       grid.appendChild(card);
     });
@@ -463,6 +489,8 @@
       text.appendChild(el('div', 'file-name', it.name));
       if (searching) text.appendChild(el('div', 'file-sub', it.where || 'Drive Saya'));
       meta.append(fileIcon(t.icon), text);
+      const check = selectionControl(i);
+      meta.insertBefore(check, meta.firstChild);
       td.appendChild(meta);
       tr.append(td, el('td', 'col-num', it.type === 'dir' ? '—' : fmtSize(it.size)), el('td', 'col-num', fmtDate(it.mtime)));
       bindItem(tr, i);
@@ -473,6 +501,22 @@
   }
 
   // ---------------------------------------------------------------- selection + item events
+  function selectionControl(i) {
+    const it = items[i];
+    const b = el('button', 'selection-check');
+    b.type = 'button';
+    b.setAttribute('aria-label', 'Pilih ' + it.name);
+    b.setAttribute('aria-pressed', selected.has(it.full) ? 'true' : 'false');
+    b.appendChild(svg(UI.check, null, 14));
+    b.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (selected.has(it.full)) selected.delete(it.full);
+      else { selected.add(it.full); lastIndex = i; }
+      updateSelection();
+    });
+    return b;
+  }
+  function addSelectionControl(node, i) { node.appendChild(selectionControl(i)); }
   function bindItem(node, i) {
     const it = items[i];
     nodes[i] = node;
@@ -482,7 +526,6 @@
     node.title = it.name;
     node.addEventListener('click', (e) => {
       if (Date.now() < suppressClickUntil) return;
-      if (COARSE) return openItem(it);
       select(i, e);
     });
     node.addEventListener('dblclick', () => { if (!COARSE) openItem(it); });
@@ -530,7 +573,14 @@
       const s = selected.has(items[i].full);
       n.classList.toggle('is-selected', s);
       n.setAttribute('aria-selected', s ? 'true' : 'false');
+      const check = n.querySelector('.selection-check');
+      if (check) {
+        check.classList.toggle('is-checked', s);
+        check.setAttribute('aria-pressed', s ? 'true' : 'false');
+        check.setAttribute('aria-label', (s ? 'Batalkan pilihan ' : 'Pilih ') + items[i].name);
+      }
     });
+    syncSelectionToolbar();
   }
   const selectedItems = () => items.filter((i) => selected.has(i.full));
 

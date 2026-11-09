@@ -103,10 +103,12 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
     // ---- selection
     nodeFor('notes.txt').dispatchEvent(ev('click'));
     check('single click selects', nodeFor('notes.txt').getAttribute('aria-selected') === 'true' && nodeFor('notes.txt').classList.contains('is-selected'));
+    check('selection checkbox is visible in the item DOM', !!nodeFor('notes.txt').querySelector('.selection-check'));
+    check('selection toolbar appears with item count and actions', !!$('selection-toolbar') && $('selection-toolbar').textContent.includes('1 dipilih') && [...$('selection-toolbar').querySelectorAll('button')].some((b) => b.textContent === 'Unduh'));
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }));
     check('Ctrl+A selects all', d.querySelectorAll('[aria-selected="true"]').length === 4);
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    check('Escape clears selection', d.querySelectorAll('[aria-selected="true"]').length === 0);
+    check('Escape clears selection', d.querySelectorAll('[aria-selected="true"]').length === 0 && !$('selection-toolbar'));
 
     // ---- grid / list toggle
     $('view-btn').click();
