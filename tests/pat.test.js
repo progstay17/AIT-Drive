@@ -36,6 +36,19 @@ const json = (r) => r.json();
       perms: { upload: true, modify: true, delete: true, share: false },
     });
     check('create test account', r.status === 201, r.status);
+    r = await owner.send('POST', '/api/admin/users', {
+      username: 'patadmin', password: 'patadmin-pass', role: 'admin',
+      perms: { upload: true, modify: true, delete: true, share: true },
+    });
+    check('create admin account for privilege-boundary test', r.status === 201, r.status);
+    const adminUser = cookieClient(stack.webUrl);
+    await adminUser.login('patadmin', 'patadmin-pass');
+    r = await adminUser.send('POST', '/api/tokens', { label: 'admin automation', scopes: ['read', 'upload', 'modify', 'delete', 'share'] });
+    const adminTokenData = await json(r);
+    check('admin account can create a scoped file PAT', r.status === 201, r.status);
+    r = await fetch(stack.webUrl + '/api/admin/users', { headers: bearer(adminTokenData.token) });
+    check('admin PAT cannot access admin APIs or inherit admin role', r.status === 403, r.status);
+
     const user = cookieClient(stack.webUrl);
     await user.login('patuser', 'patuser-pass');
 
@@ -91,6 +104,7 @@ const json = (r) => r.json();
     r = await fetch(stack.webUrl + '/api/list', { headers: bearer(writeToken) });
     check('PAT is rejected when its account is disabled', r.status === 403, r.status);
     await owner.send('PATCH', '/api/admin/users/patuser', { active: true });
+    await user.login('patuser', 'patuser-pass'); // account status changes invalidate existing browser sessions
 
     r = await user.send('DELETE', '/api/tokens/' + writeData.id);
     check('browser session can revoke its own PAT', r.status === 200, r.status);
