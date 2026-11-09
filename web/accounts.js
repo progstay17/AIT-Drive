@@ -42,7 +42,8 @@ function openStore(dataDir) {
     db = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!db.users || typeof db.users !== 'object') db.users = {};
     if (!db.nodes || typeof db.nodes !== 'object') db.nodes = {};
-    db.version = Math.max(3, Number(db.version) || 2);
+    if (!db.tokens || typeof db.tokens !== 'object') db.tokens = {};
+    db.version = Math.max(4, Number(db.version) || 2);
   } catch (e) {
     if (e.code !== 'ENOENT') { console.error(`Tidak bisa membaca ${file}: ${e.message}`); process.exit(1); }
   }
