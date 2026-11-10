@@ -172,8 +172,14 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
     await submitDialog('3');
     await submitDialog(); // "Link siap" -> Salin link
     await waitFor(() => copied.includes('/s/'), 4000, 'copied share link');
-    const shared = await fetch(copied.replace(/^https?:\/\/[^/]+/, stack.webUrl));
-    check('share link is copied and downloads the file', shared.status === 200 && (await shared.text()) === 'hello from notes');
+    const shareUrl = copied.replace(/^https?:\/\/[^/]+/, stack.webUrl);
+    const sharePage = await fetch(shareUrl);
+    check('share link opens the download landing page', sharePage.status === 200 && (await sharePage.text()).includes('Mulai download'));
+    const shareInfo = await fetch(shareUrl + '/info');
+    const shareMeta = await shareInfo.json();
+    check('share landing metadata is available', shareInfo.status === 200 && shareMeta.status === 'active' && shareMeta.name === 'renamed.txt');
+    const shared = await fetch(shareUrl + '/download');
+    check('explicit share download returns the file', shared.status === 200 && (await shared.text()) === 'hello from notes');
 
     // ---- search
     $('search').value = 'photo';
