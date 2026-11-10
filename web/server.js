@@ -55,7 +55,7 @@ function makeToken(payload) {
   const body = b64u(JSON.stringify(payload));
   return `${body}.${sign(body)}`;
 }
-function readToken(token) {
+function readToken(token, allowExpired = false) {
   if (typeof token !== 'string' || !token.includes('.')) return null;
   const [body, sig] = token.split('.');
   const exp = sign(body);
@@ -63,7 +63,7 @@ function readToken(token) {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
     const p = JSON.parse(Buffer.from(body, 'base64url').toString());
-    if (!p.exp || p.exp < Date.now()) return null;
+    if (!p.exp || (!allowExpired && p.exp < Date.now())) return null;
     return p;
   } catch { return null; }
 }
@@ -615,7 +615,7 @@ admin.delete('/users/:id', wrap(async (req, res) => {
 }));
 api.use('/admin', admin);
 
-// share links: signed, expiring, read-only download of one file, tied to the account that made it
+// share links: signed, expiring, read-only downloads tied to the account that made them.
 api.post('/share', requireScope('share'), json1, (req, res) => {
   const p = String((req.body || {}).path || '');
   const days = Math.min(Math.max(parseInt((req.body || {}).days || '7', 10) || 7, 1), 30);
@@ -627,13 +627,57 @@ api.post('/share', requireScope('share'), json1, (req, res) => {
 });
 app.use('/api', api);
 
+// Public share metadata. The signed token is the only access credential; no session or account
+// information is exposed to the recipient.
+app.get('/s/:token/info', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const p = readToken(req.params.token, true);
+  if (!p || p.k !== 'share') return res.status(404).json({ status: 'invalid', message: 'Link tidak ditemukan atau tidak valid.' });
+  if (p.exp <= Date.now()) return res.status(410).json({ status: 'expired', expiresAt: p.exp, message: 'Masa berlaku link ini sudah berakhir.' });
+  const resolved = resolveCtx({ u: p.u, tv: p.tv, o: p.o, n: ADMIN_USER });
+  if (!resolved.ctx || !resolved.ctx.perms.share) {
+    return res.status(410).json({ status: 'unavailable', message: 'Link ini sudah tidak tersedia. Minta pemiliknya membuat link baru.' });
+  }
+  const relativePath = String(p.p || '');
+  const fileName = path.posix.basename(relativePath);
+  const parentPath = path.posix.dirname(relativePath);
+  if (!fileName || fileName === '.' || fileName === '..') {
+    return res.status(404).json({ status: 'invalid', message: 'Informasi file pada link ini tidak valid.' });
+  }
+  let listing;
+  try {
+    listing = await agentJson('GET', '/list?path=' + encodeURIComponent(parentPath === '.' ? '' : parentPath), resolved.ctx);
+  } catch {
+    return res.status(503).json({ status: 'unavailable', message: MSG_OFFLINE });
+  }
+  if (listing.status !== 200 || !listing.json) {
+    return res.status(listing.status === 401 ? 502 : 503).json({ status: 'unavailable', message: listing.status === 401 ? MSG_TOKEN : MSG_OFFLINE });
+  }
+  const item = (Array.isArray(listing.json.items) ? listing.json.items : []).find((entry) => entry.name === fileName);
+  if (!item) return res.status(410).json({ status: 'unavailable', message: 'File atau folder sudah tidak tersedia.' });
+  const isFolder = item.type === 'dir';
+  res.json({
+    status: 'active',
+    name: isFolder ? fileName + '.zip' : fileName,
+    itemType: isFolder ? 'folder' : 'file',
+    size: isFolder ? null : (Number.isFinite(item.size) ? item.size : null),
+    expiresAt: p.exp,
+  });
+});
+
+app.get('/s/:token/download', (req, res) => {
+  const p = readToken(req.params.token, true);
+  if (!p || p.k !== 'share') return res.status(404).send('Link tidak valid.');
+  if (p.exp <= Date.now()) return res.status(410).send('Masa berlaku link ini sudah berakhir.');
+  const resolved = resolveCtx({ u: p.u, tv: p.tv, o: p.o, n: ADMIN_USER });
+  if (!resolved.ctx || !resolved.ctx.perms.share) return res.status(410).send('Link ini sudah tidak tersedia.');
+  proxy(req, res, resolved.ctx, '/download', { path: p.p });
+});
+
+// Share URLs show a page first; the recipient starts the transfer explicitly.
 app.get('/s/:token', (req, res) => {
-  const p = readToken(req.params.token);
-  if (!p || p.k !== 'share') return res.status(404).send('Link tidak valid atau sudah kedaluwarsa.');
-  const r = resolveCtx({ u: p.u, tv: p.tv, o: p.o, n: ADMIN_USER });
-  if (!r.ctx) return res.status(r.status).send(r.error);
-  if (!r.ctx.perms.share) return res.status(403).send('Link ini tidak berlaku lagi.');
-  proxy(req, res, r.ctx, '/download', { path: p.p });
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'public', 'share.html'));
 });
 
 // ---------- static UI ----------
