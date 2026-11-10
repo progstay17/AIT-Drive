@@ -330,12 +330,12 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     d = await r.json();
     check('carol (share permission) gets a link', r.status === 200 && /\/s\//.test(d.url), r.status);
     const carolTok = d.url.split('/').pop();
-    r = await fetch(B + '/s/' + carolTok);
+    r = await fetch(B + '/go/' + carolTok);
     check('carol share link opens the public landing page', r.status === 200 && (await r.text()).includes('Mulai download'), r.status);
-    r = await fetch(B + '/s/' + carolTok + '/info');
+    r = await fetch(B + '/go/' + carolTok + '/info');
     d = await r.json();
     check('carol share landing page exposes her file metadata', r.status === 200 && d.status === 'active' && d.name === 'doc.txt', JSON.stringify(d));
-    r = await fetch(B + '/s/' + carolTok + '/download');
+    r = await fetch(B + '/go/' + carolTok + '/download');
     check('carol share link downloads HER file without login', r.status === 200 && (await r.text()) === 'carol doc', r.status);
 
     // ============================================================ admins vs owner
@@ -431,7 +431,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('owner password cannot be changed from the UI (400)', r.status === 400, r.status);
 
     r = await own.send('PATCH', '/api/admin/users/carol', { active: false });
-    r = await fetch(B + '/s/' + carolTok + '/info');
+    r = await fetch(B + '/go/' + carolTok + '/info');
     d = await r.json();
     check('share links of a disabled account show unavailable status', r.status === 410 && d.status === 'unavailable', JSON.stringify(d));
 
