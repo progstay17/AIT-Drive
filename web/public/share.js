@@ -5,7 +5,7 @@
   const page = {
     state: $('share-state'), title: $('share-title'), message: $('share-message'),
     details: $('file-details'), name: $('file-name'), type: $('file-type'), size: $('file-size'),
-    expiry: $('expiry-panel'), remaining: $('remaining-days'), date: $('expiry-date'),
+    expiry: $('expiry-panel'), expiryStatus: $('expiry-status'), remaining: $('remaining-days'), date: $('expiry-date'),
     button: $('download-button'), note: $('download-note'), help: $('help-note'),
   };
   const dateFormat = new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeStyle: 'short' });
@@ -27,7 +27,7 @@
     if (hours > 0) return hours + ' jam' + (mins ? ' ' + mins + ' menit' : '') + ' lagi';
     return mins + ' menit lagi';
   }
-  function showUnavailable(state, message) {
+  function showUnavailable(state, message, expiresAt) {
     page.state.textContent = state === 'expired' ? 'LINK KEDALUWARSA' : 'LINK TIDAK TERSEDIA';
     page.title.textContent = state === 'expired' ? 'Masa berlaku sudah habis' : 'Link tidak dapat digunakan';
     page.message.textContent = message || 'Tautan ini tidak lagi dapat digunakan. Minta pemilik file membagikan link baru.';
@@ -37,6 +37,9 @@
     if (state === 'expired') {
       page.expiry.hidden = false;
       page.remaining.textContent = '0 hari tersisa';
+      page.expiryStatus.lastChild.textContent = ' KEDALUWARSA';
+      page.expiryStatus.classList.add('is-inactive');
+      if (expiresAt) page.date.textContent = 'Berakhir pada ' + dateFormat.format(new Date(expiresAt));
     }
   }
   async function load() {
@@ -44,7 +47,7 @@
     try {
       const response = await fetch('/s/' + encodeURIComponent(token) + '/info', { cache: 'no-store', credentials: 'omit' });
       const data = await response.json();
-      if (!response.ok || data.status !== 'active') return showUnavailable(data.status || 'unavailable', data.message);
+      if (!response.ok || data.status !== 'active') return showUnavailable(data.status || 'unavailable', data.message, data.expiresAt);
       page.state.textContent = 'LINK SIAP DIAKSES';
       page.title.textContent = 'File siap diunduh';
       page.message.textContent = 'File ini dibagikan melalui AIT Drive. Tekan tombol di bawah untuk memulai download.';
@@ -63,6 +66,8 @@
         if (left <= 0) {
           page.button.hidden = true;
           page.note.hidden = true;
+          page.expiryStatus.lastChild.textContent = ' KEDALUWARSA';
+          page.expiryStatus.classList.add('is-inactive');
           page.state.textContent = 'LINK KEDALUWARSA';
           page.title.textContent = 'Masa berlaku sudah habis';
           page.message.textContent = 'Link ini sudah tidak bisa digunakan. Minta pemilik file membuat link baru.';
