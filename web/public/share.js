@@ -1,7 +1,10 @@
 'use strict';
 (() => {
   const $ = (id) => document.getElementById(id);
-  const routeParts = location.pathname.split('/').filter(Boolean);\n  const shortRoute = routeParts[0] === 'go';\n  const routeBase = shortRoute ? '/go/' : '/s/';\n  const token = routeParts[1] || '';
+  const routeParts = location.pathname.split('/').filter(Boolean);
+  const shortRoute = routeParts[0] === 'go';
+  const routeBase = shortRoute ? '/go/' : '/s/';
+  const token = routeParts[1] || '';
   const page = {
     state: $('share-state'), title: $('share-title'), message: $('share-message'),
     details: $('file-details'), name: $('file-name'), type: $('file-type'), size: $('file-size'),
