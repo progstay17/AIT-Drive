@@ -169,9 +169,10 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
 
     // ---- share link
     await ctxClick('renamed.txt', 'Buat link berbagi');
-    await submitDialog('3');
+    await submitDialog('3'); // expiry
+    await submitDialog(''); // empty custom slug -> automatic short URL
     await submitDialog(); // "Link siap" -> Salin link
-    await waitFor(() => copied.includes('/s/'), 4000, 'copied share link');
+    await waitFor(() => copied.includes('/go/'), 4000, 'copied share link');
     const shareUrl = copied.replace(/^https?:\/\/[^/]+/, stack.webUrl);
     const sharePage = await fetch(shareUrl);
     check('share link opens the download landing page', sharePage.status === 200 && (await sharePage.text()).includes('Mulai download'));

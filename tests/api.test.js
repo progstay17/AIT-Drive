@@ -146,17 +146,19 @@ function chunkedUpload(base, cookie, dir, name, buf) {
 
     r = await own.post('share', { path: 'Archive/renamed.txt', days: 1 });
     d = await r.json();
-    const ownTok = d.url.split('/').pop();
-    r = await fetch(B + '/s/' + ownTok);
+    const ownSlug = d.url.split('/').pop();
+    check('new share URL uses a short /go/ alias', d.short === true && typeof d.url === 'string' && d.url.startsWith('http') && d.url.includes('/go/') && ownSlug.length <= 12, d.url);
+    r = await fetch(B + '/go/' + ownSlug);
     const sharePage = await r.text();
-    check('owner share URL opens a download landing page without login', r.status === 200 && sharePage.includes('/share.js') && sharePage.includes('Mulai download'), r.status);
-    r = await fetch(B + '/s/' + ownTok + '/info');
+    check('short share URL opens a landing page without login', r.status === 200 && sharePage.includes('/share.js') && sharePage.includes('Mulai download'), r.status);
+    r = await fetch(B + '/go/' + ownSlug + '/info');
+    check('short share metadata is not cacheable', r.headers.get('cache-control') === 'no-store', r.headers.get('cache-control'));
     d = await r.json();
-    check('share landing metadata exposes file details and expiry', r.status === 200 && d.status === 'active' && d.name === 'renamed.txt' && d.expiresAt > Date.now(), JSON.stringify(d));
-    r = await fetch(B + '/s/' + ownTok + '/download');
-    check('share download requires the explicit download endpoint', r.status === 200 && (await r.text()) === 'hello cloud drive', r.status);
-    r = await fetch(B + '/s/' + ownTok + 'x/info');
-    check('tampered share token metadata rejected', r.status === 404, r.status);
+    check('short share metadata exposes file details and expiry', r.status === 200 && d.status === 'active' && d.name === 'renamed.txt' && d.expiresAt > Date.now(), JSON.stringify(d));
+    r = await fetch(B + '/go/' + ownSlug + '/download');
+    check('short share download requires explicit download endpoint', r.status === 200 && (await r.text()) === 'hello cloud drive', r.status);
+    r = await fetch(B + '/go/' + ownSlug + 'x/info');
+    check('unknown short alias is rejected', r.status === 404, r.status);
 
     r = await fetch(A + '/list');
     check('agent without token is 401', r.status === 401, r.status);
@@ -325,16 +327,20 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     const ca = client(B);
     await ca.login('carol', 'carol-pass-1');
     await ca.upload('doc.txt', 'carol doc');
-    r = await ca.post('share', { path: 'doc.txt', days: 1 });
+    r = await ca.post('share', { path: 'doc.txt', days: 1, slug: 'Mining Bayu' });
     d = await r.json();
-    check('carol (share permission) gets a link', r.status === 200 && /\/s\//.test(d.url), r.status);
-    const carolTok = d.url.split('/').pop();
-    r = await fetch(B + '/s/' + carolTok);
+    check('carol (share permission) can choose a normalized custom URL', r.status === 200 && d.custom === true && d.slug === 'mining-bayu' && d.url.endsWith('/go/mining-bayu'), JSON.stringify(d));
+    const carolTok = d.slug;
+    r = await ca.post('share', { path: 'doc.txt', days: 1, slug: 'mining-bayu' });
+    check('custom URL collision is rejected (409)', r.status === 409, r.status);
+    r = await ca.post('share', { path: 'doc.txt', days: 1, slug: 'info' });
+    check('reserved custom URL is rejected (400)', r.status === 400, r.status);
+    r = await fetch(B + '/go/' + carolTok);
     check('carol share link opens the public landing page', r.status === 200 && (await r.text()).includes('Mulai download'), r.status);
-    r = await fetch(B + '/s/' + carolTok + '/info');
+    r = await fetch(B + '/go/' + carolTok + '/info');
     d = await r.json();
     check('carol share landing page exposes her file metadata', r.status === 200 && d.status === 'active' && d.name === 'doc.txt', JSON.stringify(d));
-    r = await fetch(B + '/s/' + carolTok + '/download');
+    r = await fetch(B + '/go/' + carolTok + '/download');
     check('carol share link downloads HER file without login', r.status === 200 && (await r.text()) === 'carol doc', r.status);
 
     // ============================================================ admins vs owner
@@ -430,7 +436,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('owner password cannot be changed from the UI (400)', r.status === 400, r.status);
 
     r = await own.send('PATCH', '/api/admin/users/carol', { active: false });
-    r = await fetch(B + '/s/' + carolTok + '/info');
+    r = await fetch(B + '/go/' + carolTok + '/info');
     d = await r.json();
     check('share links of a disabled account show unavailable status', r.status === 410 && d.status === 'unavailable', JSON.stringify(d));
 

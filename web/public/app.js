@@ -759,10 +759,12 @@
   }
   async function share(it) {
     const kind = it.type === 'dir' ? 'folder' : 'file';
-    const days = await dialog({ title: 'Bagikan ' + kind, message: 'Siapa pun yang memiliki link dapat ' + (it.type === 'dir' ? 'mengunduh folder ini sebagai ZIP beserta isinya' : 'mengunduh file ini') + '. Link berlaku 1–30 hari.', input: true, value: '7', confirm: 'Buat link' });
-    if (!days) return;
+    const days = await dialog({ title: 'Bagikan ' + kind, message: 'Siapa pun yang memiliki link dapat ' + (it.type === 'dir' ? 'mengunduh folder ini sebagai ZIP beserta isinya' : 'mengunduh file ini') + '. Link berlaku 1–30 hari.', input: true, value: '7', confirm: 'Lanjut' });
+    if (days === null) return;
+    const slug = await dialog({ title: 'Custom URL (opsional)', message: 'Isi nama link yang mudah diingat, misalnya mining-bayu. Kosongkan untuk membuat link otomatis.', input: true, value: '', placeholder: 'contoh: mining-bayu', confirm: 'Buat link' });
+    if (slug === null) return;
     try {
-      const d = await post('share', { path: it.full, days: parseInt(days, 10) || 7 });
+      const d = await post('share', { path: it.full, days: parseInt(days, 10) || 7, ...(slug.trim() ? { slug: slug.trim() } : {}) });
       const link = await dialog({ title: 'Halaman unduh siap', message: `Penerima akan melihat halaman download dengan sisa masa berlaku link (${d.days} hari).`, input: true, value: d.url, readonly: true, confirm: 'Salin link' });
       if (link === null) return;
       try { await navigator.clipboard.writeText(d.url); ok('Link disalin', `Berlaku ${d.days} hari`); }
