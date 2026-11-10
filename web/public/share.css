@@ -47,6 +47,8 @@ h1 { margin: 0; font-size: clamp(23px, 5vw, 29px); line-height: 1.2; letter-spac
 .expiry-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .expiry-indicator { display: flex; align-items: center; gap: 6px; color: #287b62; font-size: 9px; font-weight: 750; letter-spacing: .08em; }
 .expiry-indicator span { width: 6px; height: 6px; border-radius: 50%; background: #38a17f; }
+.expiry-indicator.is-inactive { color: #a24b4b; }
+.expiry-indicator.is-inactive span { background: #bf6565; }
 .remaining { display: block; margin-top: 9px; color: #183f60; font-size: 20px; font-weight: 690; letter-spacing: -.035em; }
 .expiry-panel p { margin: 4px 0 0; color: #75879a; font-size: 11px; }
 .download-button { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 49px; margin-top: 22px; border: 0; border-radius: 9px; background: var(--blue); color: #fff; text-decoration: none; font-size: 14px; font-weight: 680; letter-spacing: -.01em; transition: background .16s ease, transform .16s ease, box-shadow .16s ease; box-shadow: 0 5px 13px rgba(23, 104, 168, .16); }
