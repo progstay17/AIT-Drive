@@ -147,7 +147,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     r = await own.post('share', { path: 'Archive/renamed.txt', days: 1 });
     d = await r.json();
     const ownSlug = d.url.split('/').pop();
-    check('new share URL uses a short /go/ alias', d.short === true && /^https?:\\/\\//.test(d.url) && d.url.includes('/go/') && ownSlug.length <= 12, d.url);
+    check('new share URL uses a short /go/ alias', d.short === true && typeof d.url === 'string' && d.url.startsWith('http') && d.url.includes('/go/') && ownSlug.length <= 12, d.url);
     r = await fetch(B + '/go/' + ownSlug);
     const sharePage = await r.text();
     check('short share URL opens a landing page without login', r.status === 200 && sharePage.includes('/share.js') && sharePage.includes('Mulai download'), r.status);
