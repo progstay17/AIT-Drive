@@ -25,7 +25,7 @@
   const el = (tag, cls, text) => {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
-    if (text != null) e.textContent = text;
+    if (text != null) e.textContent = window.AITLang ? window.AITLang.t(text) : text;
     return e;
   };
   const fmtSize = (n) => {
@@ -35,7 +35,7 @@
     while (n >= 1024 && i < 4) { n /= 1024; i++; }
     return (n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i];
   };
-  const fmtDate = (ms) => new Date(ms).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+  const fmtDate = (ms) => new Date(ms).toLocaleDateString(window.AITLang && window.AITLang.get() === 'en' ? 'en-US' : window.AITLang && window.AITLang.get() === 'zh' ? 'zh-CN' : 'id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
   const join = (a, b) => (a ? a + '/' + b : b);
   const parentOf = (p) => p.split('/').slice(0, -1).join('/');
   const extOf = (n) => (n.includes('.') ? n.split('.').pop().toLowerCase() : '');
