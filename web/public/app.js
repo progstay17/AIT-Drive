@@ -591,7 +591,6 @@
     node.addEventListener('click', (e) => {
       if (Date.now() < suppressClickUntil) return;
       clearTimeout(itemClickTimer);
-      if (COARSE) { if (selected.size && !selected.has(it.full)) { selected.add(it.full); updateSelection(); } else { openItem(it); } return; }
       itemClickTimer = setTimeout(() => select(i, e), 240);
     });
     node.addEventListener('dblclick', () => {
