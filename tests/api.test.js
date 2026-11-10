@@ -328,7 +328,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     await ca.upload('doc.txt', 'carol doc');
     r = await ca.post('share', { path: 'doc.txt', days: 1 });
     d = await r.json();
-    check('carol (share permission) gets a link', r.status === 200 && /\/s\//.test(d.url), r.status);
+    check('carol (share permission) gets a short link', r.status === 200 && /\/go\//.test(d.url), r.status);
     const carolTok = d.url.split('/').pop();
     r = await fetch(B + '/go/' + carolTok);
     check('carol share link opens the public landing page', r.status === 200 && (await r.text()).includes('Mulai download'), r.status);
