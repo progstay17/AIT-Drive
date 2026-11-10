@@ -352,6 +352,18 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('carol share landing page exposes her file metadata', r.status === 200 && d.status === 'active' && d.name === 'doc.txt', JSON.stringify(d));
     r = await fetch(B + '/go/' + carolTok + '/download');
     check('carol share link downloads HER file without login', r.status === 200 && (await r.text()) === 'carol doc', r.status);
+    r = await ca.get('/api/shares');
+    d = await r.json();
+    check('share manager is available to regular users with Share permission', r.status === 200 && d.items.some((item) => item.slug === carolTok && item.path === 'doc.txt'), JSON.stringify(d));
+    r = await own.get('/api/shares');
+    d = await r.json();
+    check('share manager does not expose another account links', r.status === 200 && !d.items.some((item) => item.slug === carolTok), JSON.stringify(d));
+    r = await own.send('DELETE', '/api/shares/' + encodeURIComponent(carolTok));
+    check('another account cannot revoke Carol share link', r.status === 404, r.status);
+    r = await ca.send('DELETE', '/api/shares/' + encodeURIComponent(carolTok));
+    check('Carol can revoke her own share link', r.status === 200, r.status);
+    r = await fetch(B + '/go/' + carolTok + '/info');
+    check('Carol revoked alias is gone', r.status === 404, r.status);
 
     // ============================================================ admins vs owner
     r = await mk(own, { username: 'dana', password: 'dana-pass-12', role: 'admin' });
