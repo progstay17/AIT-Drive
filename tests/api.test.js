@@ -159,6 +159,16 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('short share download requires explicit download endpoint', r.status === 200 && (await r.text()) === 'hello cloud drive', r.status);
     r = await fetch(B + '/go/' + ownSlug + 'x/info');
     check('unknown short alias is rejected', r.status === 404, r.status);
+    r = await own.get('/api/shares');
+    d = await r.json();
+    check('share manager lists links created by this account', r.status === 200 && d.items.some((item) => item.slug === ownSlug && item.path === 'Archive/renamed.txt' && item.status === 'active'), JSON.stringify(d));
+    r = await own.send('DELETE', '/api/shares/' + encodeURIComponent(ownSlug));
+    check('owner can revoke an owned share link', r.status === 200 && (await r.json()).ok === true, r.status);
+    r = await fetch(B + '/go/' + ownSlug + '/info');
+    check('revoked short alias is no longer resolvable', r.status === 404, r.status);
+    r = await own.get('/api/shares');
+    d = await r.json();
+    check('revoked link is removed from share manager', r.status === 200 && !d.items.some((item) => item.slug === ownSlug), JSON.stringify(d));
 
     r = await fetch(A + '/list');
     check('agent without token is 401', r.status === 401, r.status);
@@ -342,6 +352,22 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('carol share landing page exposes her file metadata', r.status === 200 && d.status === 'active' && d.name === 'doc.txt', JSON.stringify(d));
     r = await fetch(B + '/go/' + carolTok + '/download');
     check('carol share link downloads HER file without login', r.status === 200 && (await r.text()) === 'carol doc', r.status);
+    r = await ca.get('/api/shares');
+    d = await r.json();
+    check('share manager is available to regular users with Share permission', r.status === 200 && d.items.some((item) => item.slug === carolTok && item.path === 'doc.txt'), JSON.stringify(d));
+    r = await own.get('/api/shares');
+    d = await r.json();
+    check('share manager does not expose another account links', r.status === 200 && !d.items.some((item) => item.slug === carolTok), JSON.stringify(d));
+    r = await own.send('DELETE', '/api/shares/' + encodeURIComponent(carolTok));
+    check('another account cannot revoke Carol share link', r.status === 404, r.status);
+    r = await ca.send('DELETE', '/api/shares/' + encodeURIComponent(carolTok));
+    check('Carol can revoke her own share link', r.status === 200, r.status);
+    r = await fetch(B + '/go/' + carolTok + '/info');
+    check('Carol revoked alias is gone', r.status === 404, r.status);
+    r = await ca.post('share', { path: 'doc.txt', days: 1, slug: 'carol-disabled-test' });
+    d = await r.json();
+    const carolDisabledTok = d.slug;
+    check('Carol can create a second link for account lifecycle coverage', r.status === 200, JSON.stringify(d));
 
     // ============================================================ admins vs owner
     r = await mk(own, { username: 'dana', password: 'dana-pass-12', role: 'admin' });
@@ -436,7 +462,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('owner password cannot be changed from the UI (400)', r.status === 400, r.status);
 
     r = await own.send('PATCH', '/api/admin/users/carol', { active: false });
-    r = await fetch(B + '/go/' + carolTok + '/info');
+    r = await fetch(B + '/go/' + carolDisabledTok + '/info');
     d = await r.json();
     check('share links of a disabled account show unavailable status', r.status === 410 && d.status === 'unavailable', JSON.stringify(d));
 

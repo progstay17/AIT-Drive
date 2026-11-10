@@ -181,6 +181,17 @@ const { startStack, waitFor, sleep, reporter, ROOT } = require('./harness');
     check('share landing metadata is available', shareInfo.status === 200 && shareMeta.status === 'active' && shareMeta.name === 'renamed.txt');
     const shared = await fetch(shareUrl + '/download');
     check('explicit share download returns the file', shared.status === 200 && (await shared.text()) === 'hello from notes');
+    check('Link Berbagi navigation is visible to users with Share permission', !$('nav-shares').hidden);
+    $('nav-shares').click();
+    await waitFor(() => $('page-title').textContent === 'Link Berbagi' && d.querySelector('.share-link-row'), 4000, 'share manager view');
+    check('share manager shows the link just created', d.querySelector('.share-link-row').textContent.includes('renamed.txt') && d.querySelector('.share-link-url').textContent.includes('/go/'));
+    d.querySelector('.share-link-actions .danger-text').click();
+    await submitDialog(); // confirm revoke
+    await waitFor(() => !d.querySelector('.share-link-row'), 4000, 'share link revoked in UI');
+    const revokedInfo = await fetch(shareUrl + '/info');
+    check('revoke action removes the public short link', revokedInfo.status === 404);
+    $('nav-drive').click();
+    await waitFor(() => $('page-title').textContent === 'Drive Saya', 3000, 'return to drive');
 
     // ---- search
     $('search').value = 'photo';

@@ -638,6 +638,33 @@ api.post('/share', requireScope('share'), json1, wrap(async (req, res) => {
   await saveDb();
   res.json({ url: `${req.protocol}://${req.get('host')}/go/${slug}`, days, short: true, custom: !!requestedSlug, slug });
 }));
+
+// Manage only the share links created by the authenticated account.
+api.get('/shares', requireScope('share'), (req, res) => {
+  if (!req.ctx.perms.share) return res.status(403).json({ error: 'Akun kamu tidak punya izin mengelola link berbagi.' });
+  const links = db.shortLinks && typeof db.shortLinks === 'object' ? db.shortLinks : {};
+  const items = Object.entries(links).filter(([, entry]) => entry && entry.accountId === req.ctx.id).map(([slug, entry]) => {
+    const payload = readToken(entry.token, true);
+    return {
+      slug, url: `${req.protocol}://${req.get('host')}/go/${slug}`,
+      path: payload && payload.k === 'share' ? payload.p : '',
+      createdAt: Number(entry.createdAt) || 0,
+      expiresAt: payload && payload.k === 'share' ? payload.exp : 0,
+      custom: !!entry.custom,
+      status: !payload || payload.k !== 'share' ? 'invalid' : payload.exp <= Date.now() ? 'expired' : 'active',
+    };
+  }).sort((a, b) => b.createdAt - a.createdAt);
+  res.json({ items });
+});
+api.delete('/shares/:slug', requireScope('share'), wrap(async (req, res) => {
+  if (!req.ctx.perms.share) throw httpError(403, 'Akun kamu tidak punya izin mengelola link berbagi.');
+  const slug = String(req.params.slug || '');
+  const entry = db.shortLinks && db.shortLinks[slug];
+  if (!entry || entry.accountId !== req.ctx.id) throw httpError(404, 'Link tidak ditemukan atau bukan milik akun kamu.');
+  delete db.shortLinks[slug];
+  await saveDb();
+  res.json({ ok: true, slug });
+}));
 app.use('/api', api);
 
 // Public share metadata. The signed token is the only access credential; no session or account

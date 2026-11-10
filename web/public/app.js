@@ -310,17 +310,80 @@
     } else {
       if (location.hash === '#admin') { location.hash = '#/'; return; }
       adminMode = false;
-      load(hashPath());
+      if (hashPath() === 'shared' && can('share')) showSharedLinks();
+      else if (hashPath() === 'shared') { location.hash = '#/'; return; }
+      else load(hashPath());
     }
-    $('search').disabled = adminMode;
-    $('nav-drive').classList.toggle('is-active', !adminMode);
+    const sharedMode = !adminMode && hashPath() === 'shared';
+    $('search').disabled = adminMode || sharedMode;
+    $('nav-drive').classList.toggle('is-active', !adminMode && !sharedMode);
+    $('nav-shares').classList.toggle('is-active', sharedMode);
     $('nav-admin').classList.toggle('is-active', adminMode);
     if (adminMode) $('nav-admin').setAttribute('aria-current', 'page'); else $('nav-admin').removeAttribute('aria-current');
-    if (adminMode) $('nav-drive').removeAttribute('aria-current'); else $('nav-drive').setAttribute('aria-current', 'page');
+    if (sharedMode) $('nav-shares').setAttribute('aria-current', 'page'); else $('nav-shares').removeAttribute('aria-current');
+    if (!adminMode && !sharedMode) $('nav-drive').setAttribute('aria-current', 'page'); else $('nav-drive').removeAttribute('aria-current');
   }
   window.addEventListener('hashchange', () => { if (!$('app-view').hidden && me) route(); });
   $('nav-admin').addEventListener('click', () => closeDrawer());
   $('nav-drive').addEventListener('click', (e) => { e.preventDefault(); nav(''); });
+  $('nav-shares').addEventListener('click', (e) => { e.preventDefault(); nav('shared'); });
+
+  // ---------------------------------------------------------------- shared links
+  async function showSharedLinks() {
+    setHeading('Link Berbagi', 'Kelola tautan yang dibuat oleh akun ini');
+    $('count').textContent = '';
+    $('content').replaceChildren();
+    $('content').classList.remove('loading-fade');
+    const loading = el('div', 'empty-state');
+    loading.append(el('strong', null, 'Memuat link berbagi…'));
+    $('content').appendChild(loading);
+    try {
+      const data = await api('/api/shares');
+      const links = Array.isArray(data.items) ? data.items : [];
+      $('content').replaceChildren();
+      $('count').textContent = links.length + ' LINK';
+      if (!links.length) {
+        const empty = el('section', 'empty-state');
+        empty.append(el('strong', null, 'Belum ada link berbagi'), el('p', 'muted', 'Link yang kamu buat dari menu Bagikan akan muncul di sini.'));
+        $('content').appendChild(empty);
+        return;
+      }
+      const list = el('div', 'share-link-list');
+      for (const item of links) {
+        const row = el('article', 'share-link-row');
+        const main = el('div', 'share-link-main');
+        const path = el('strong', 'share-link-path', item.path || 'File tidak tersedia');
+        const url = el('a', 'share-link-url', item.url);
+        url.href = item.url; url.target = '_blank'; url.rel = 'noopener noreferrer';
+        const meta = el('div', 'share-link-meta');
+        const statusText = item.status === 'active' ? 'Aktif' : item.status === 'expired' ? 'Kedaluwarsa' : 'Tidak valid';
+        meta.append(el('span', 'share-link-status ' + (item.status === 'active' ? 'is-active' : 'is-inactive'), statusText));
+        meta.append(el('span', null, item.custom ? 'Custom URL' : 'URL otomatis'));
+        if (item.expiresAt) meta.append(el('span', null, 'Berakhir ' + new Date(item.expiresAt).toLocaleString('id-ID')));
+        main.append(path, url, meta);
+        const actions = el('div', 'share-link-actions');
+        const copy = el('button', 'btn btn-secondary btn-sm', 'Salin');
+        copy.type = 'button';
+        copy.onclick = async () => { try { await navigator.clipboard.writeText(item.url); ok('Link disalin', item.slug); } catch { fail('Tidak bisa menyalin', 'Salin URL langsung dari tautan.'); } };
+        const revoke = el('button', 'btn btn-ghost btn-sm danger-text', 'Cabut');
+        revoke.type = 'button';
+        revoke.disabled = item.status === 'invalid';
+        revoke.onclick = async () => {
+          const yes = await dialog({ title: 'Cabut link?', message: 'Link ini akan langsung berhenti berfungsi dan slug-nya bisa digunakan kembali.', confirm: 'Cabut link', danger: true });
+          if (!yes) return;
+          try { await send('DELETE', '/api/shares/' + encodeURIComponent(item.slug)); ok('Link dicabut', 'Tautan tidak bisa digunakan lagi.'); showSharedLinks(); }
+          catch (e) { fail('Gagal mencabut link', e.message); }
+        };
+        actions.append(copy, revoke);
+        row.append(main, actions);
+        list.appendChild(row);
+      }
+      $('content').appendChild(list);
+    } catch (e) {
+      $('content').replaceChildren();
+      renderError(e);
+    }
+  }
 
   // ---------------------------------------------------------------- loading
   async function load(path) {
@@ -1090,6 +1153,7 @@
     $('account-role').textContent = me.role === 'owner' ? 'Owner' : me.role === 'admin' ? 'Admin' : 'Pengguna';
     $('pw-btn').hidden = !me.canChangePassword;
     $('nav-admin').hidden = !me.canAdmin;
+    $('nav-shares').hidden = !can('share');
     const up = can('upload'), mod = can('modify');
     for (const id of ['upload-btn', 'upload-btn-top']) { $(id).disabled = !up; $(id).title = up ? '' : 'Tidak punya izin mengunggah'; }
     for (const id of ['mkdir-btn', 'mkdir-btn-top']) { $(id).disabled = !mod; $(id).title = mod ? '' : 'Tidak punya izin membuat folder'; }
