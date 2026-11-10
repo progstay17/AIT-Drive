@@ -1,7 +1,7 @@
 'use strict';
 (() => {
   const $ = (id) => document.getElementById(id);
-  const token = location.pathname.split('/')[2] || '';
+  const routeParts = location.pathname.split('/').filter(Boolean);\n  const shortRoute = routeParts[0] === 'go';\n  const routeBase = shortRoute ? '/go/' : '/s/';\n  const token = routeParts[1] || '';
   const page = {
     state: $('share-state'), title: $('share-title'), message: $('share-message'),
     details: $('file-details'), name: $('file-name'), type: $('file-type'), size: $('file-size'),
@@ -45,7 +45,7 @@
   async function load() {
     if (!token) return showUnavailable('invalid', 'Tautan yang kamu buka tidak lengkap.');
     try {
-      const response = await fetch('/s/' + encodeURIComponent(token) + '/info', { cache: 'no-store', credentials: 'omit' });
+      const response = await fetch(routeBase + encodeURIComponent(token) + '/info', { cache: 'no-store', credentials: 'omit' });
       const data = await response.json();
       if (!response.ok || data.status !== 'active') return showUnavailable(data.status || 'unavailable', data.message, data.expiresAt);
       page.state.textContent = 'LINK SIAP DIAKSES';
@@ -56,7 +56,7 @@
       page.size.textContent = data.size == null ? 'Dihitung saat download' : bytes(data.size);
       page.details.hidden = false;
       page.expiry.hidden = false;
-      page.button.href = '/s/' + encodeURIComponent(token) + '/download';
+      page.button.href = routeBase + encodeURIComponent(token) + '/download';
       page.button.hidden = false;
       page.note.hidden = false;
       const updateCountdown = () => {
