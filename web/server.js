@@ -617,19 +617,26 @@ api.use('/admin', admin);
 
 // share links: signed, expiring, read-only downloads tied to the account that made them.
 api.post('/share', requireScope('share'), json1, wrap(async (req, res) => {
-  const p = String((req.body || {}).path || '');
-  const days = Math.min(Math.max(parseInt((req.body || {}).days || '7', 10) || 7, 1), 30);
+  const body = req.body || {};
+  const p = String(body.path || '');
+  const days = Math.min(Math.max(parseInt(body.days || '7', 10) || 7, 1), 30);
   if (!p) throw httpError(400, 'path required');
   if (!req.ctx.perms.share) throw httpError(403, 'Akun kamu tidak punya izin untuk membagikan link.');
+  db.shortLinks = db.shortLinks && typeof db.shortLinks === 'object' ? db.shortLinks : {};
+  const requestedSlug = body.slug == null || body.slug === '' ? '' : String(body.slug).trim().toLowerCase()
+    .replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (body.slug != null && body.slug !== '' && (requestedSlug.length < 3 || requestedSlug.length > 48 || /^(info|download)$/.test(requestedSlug))) {
+    throw httpError(400, 'Custom URL harus 3–48 karakter, memakai huruf kecil, angka, atau tanda hubung, dan bukan kata yang dicadangkan.');
+  }
+  if (requestedSlug && db.shortLinks[requestedSlug]) throw httpError(409, 'Custom URL sudah digunakan. Pilih nama lain.');
   const account = req.ctx.id === OWNER_ID ? null : db.users[req.ctx.id];
   const token = makeToken({ k: 'share', p, u: req.ctx.id, tv: account ? account.tv : undefined, o: req.ctx.id === OWNER_ID ? 1 : 0, exp: Date.now() + days * 86400000 });
   // The short code is only an alias. The signed token remains the authority for expiry/revocation.
-  db.shortLinks = db.shortLinks && typeof db.shortLinks === 'object' ? db.shortLinks : {};
-  let slug;
-  do { slug = b64u(crypto.randomBytes(6)); } while (db.shortLinks[slug]);
-  db.shortLinks[slug] = { token, createdAt: Date.now(), accountId: req.ctx.id };
+  let slug = requestedSlug;
+  if (!slug) do { slug = b64u(crypto.randomBytes(6)); } while (db.shortLinks[slug]);
+  db.shortLinks[slug] = { token, createdAt: Date.now(), accountId: req.ctx.id, custom: !!requestedSlug };
   await saveDb();
-  res.json({ url: `${req.protocol}://${req.get('host')}/go/${slug}`, days, short: true });
+  res.json({ url: `${req.protocol}://${req.get('host')}/go/${slug}`, days, short: true, custom: !!requestedSlug, slug });
 }));
 app.use('/api', api);
 
