@@ -689,6 +689,8 @@ app.get('/s/:token/download', (req, res) => {
 
 // Short aliases resolve internally; never redirect recipients to the long signed token URL.
 function shortShareToken(req, res, next) {
+  // Short-link metadata and downloads must never be cached by browsers or intermediary proxies.
+  res.setHeader('Cache-Control', 'no-store');
   const entry = db.shortLinks && db.shortLinks[String(req.params.slug || '')];
   if (!entry || !entry.token) return res.status(404).json({ status: 'invalid', message: 'Link singkat tidak ditemukan.' });
   req.shareToken = entry.token;
