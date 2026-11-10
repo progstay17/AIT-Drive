@@ -364,6 +364,10 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('Carol can revoke her own share link', r.status === 200, r.status);
     r = await fetch(B + '/go/' + carolTok + '/info');
     check('Carol revoked alias is gone', r.status === 404, r.status);
+    r = await ca.post('share', { path: 'doc.txt', days: 1, slug: 'carol-disabled-test' });
+    d = await r.json();
+    const carolDisabledTok = d.slug;
+    check('Carol can create a second link for account lifecycle coverage', r.status === 200, JSON.stringify(d));
 
     // ============================================================ admins vs owner
     r = await mk(own, { username: 'dana', password: 'dana-pass-12', role: 'admin' });
@@ -458,7 +462,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('owner password cannot be changed from the UI (400)', r.status === 400, r.status);
 
     r = await own.send('PATCH', '/api/admin/users/carol', { active: false });
-    r = await fetch(B + '/go/' + carolTok + '/info');
+    r = await fetch(B + '/go/' + carolDisabledTok + '/info');
     d = await r.json();
     check('share links of a disabled account show unavailable status', r.status === 410 && d.status === 'unavailable', JSON.stringify(d));
 
