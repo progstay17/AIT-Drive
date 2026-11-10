@@ -146,17 +146,18 @@ function chunkedUpload(base, cookie, dir, name, buf) {
 
     r = await own.post('share', { path: 'Archive/renamed.txt', days: 1 });
     d = await r.json();
-    const ownTok = d.url.split('/').pop();
-    r = await fetch(B + '/s/' + ownTok);
+    const ownSlug = d.url.split('/').pop();
+    check('new share URL uses a short /go/ alias', d.short === true && /^https?:\\/\\//.test(d.url) && d.url.includes('/go/') && ownSlug.length <= 12, d.url);
+    r = await fetch(B + '/go/' + ownSlug);
     const sharePage = await r.text();
-    check('owner share URL opens a download landing page without login', r.status === 200 && sharePage.includes('/share.js') && sharePage.includes('Mulai download'), r.status);
-    r = await fetch(B + '/s/' + ownTok + '/info');
+    check('short share URL opens a landing page without login', r.status === 200 && sharePage.includes('/share.js') && sharePage.includes('Mulai download'), r.status);
+    r = await fetch(B + '/go/' + ownSlug + '/info');
     d = await r.json();
-    check('share landing metadata exposes file details and expiry', r.status === 200 && d.status === 'active' && d.name === 'renamed.txt' && d.expiresAt > Date.now(), JSON.stringify(d));
-    r = await fetch(B + '/s/' + ownTok + '/download');
-    check('share download requires the explicit download endpoint', r.status === 200 && (await r.text()) === 'hello cloud drive', r.status);
-    r = await fetch(B + '/s/' + ownTok + 'x/info');
-    check('tampered share token metadata rejected', r.status === 404, r.status);
+    check('short share metadata exposes file details and expiry', r.status === 200 && d.status === 'active' && d.name === 'renamed.txt' && d.expiresAt > Date.now(), JSON.stringify(d));
+    r = await fetch(B + '/go/' + ownSlug + '/download');
+    check('short share download requires explicit download endpoint', r.status === 200 && (await r.text()) === 'hello cloud drive', r.status);
+    r = await fetch(B + '/go/' + ownSlug + 'x/info');
+    check('unknown short alias is rejected', r.status === 404, r.status);
 
     r = await fetch(A + '/list');
     check('agent without token is 401', r.status === 401, r.status);
