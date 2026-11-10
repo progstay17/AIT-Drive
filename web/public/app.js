@@ -763,7 +763,7 @@
     if (!days) return;
     try {
       const d = await post('share', { path: it.full, days: parseInt(days, 10) || 7 });
-      const link = await dialog({ title: 'Link siap', message: `Berlaku ${d.days} hari.`, input: true, value: d.url, readonly: true, confirm: 'Salin link' });
+      const link = await dialog({ title: 'Halaman unduh siap', message: `Penerima akan melihat halaman download dengan sisa masa berlaku link (${d.days} hari).`, input: true, value: d.url, readonly: true, confirm: 'Salin link' });
       if (link === null) return;
       try { await navigator.clipboard.writeText(d.url); ok('Link disalin', `Berlaku ${d.days} hari`); }
       catch { fail('Tidak bisa menyalin otomatis', 'Salin manual dari kotak link.'); }
