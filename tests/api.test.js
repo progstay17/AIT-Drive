@@ -148,9 +148,15 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     d = await r.json();
     const ownTok = d.url.split('/').pop();
     r = await fetch(B + '/s/' + ownTok);
-    check('owner share link works without login', r.status === 200 && (await r.text()) === 'hello cloud drive', r.status);
-    r = await fetch(B + '/s/' + ownTok + 'x');
-    check('tampered share link rejected', r.status === 404, r.status);
+    const sharePage = await r.text();
+    check('owner share URL opens a download landing page without login', r.status === 200 && sharePage.includes('/share.js') && sharePage.includes('Mulai download'), r.status);
+    r = await fetch(B + '/s/' + ownTok + '/info');
+    d = await r.json();
+    check('share landing metadata exposes file details and expiry', r.status === 200 && d.status === 'active' && d.name === 'renamed.txt' && d.expiresAt > Date.now(), JSON.stringify(d));
+    r = await fetch(B + '/s/' + ownTok + '/download');
+    check('share download requires the explicit download endpoint', r.status === 200 && (await r.text()) === 'hello cloud drive', r.status);
+    r = await fetch(B + '/s/' + ownTok + 'x/info');
+    check('tampered share token metadata rejected', r.status === 404, r.status);
 
     r = await fetch(A + '/list');
     check('agent without token is 401', r.status === 401, r.status);
@@ -419,8 +425,9 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('owner password cannot be changed from the UI (400)', r.status === 400, r.status);
 
     r = await own.send('PATCH', '/api/admin/users/carol', { active: false });
-    r = await fetch(B + '/s/' + carolTok);
-    check('share links of a disabled account stop working', r.status === 401 || r.status === 403, r.status);
+    r = await fetch(B + '/s/' + carolTok + '/info');
+    d = await r.json();
+    check('share links of a disabled account show unavailable status', r.status === 410 && d.status === 'unavailable', JSON.stringify(d));
 
     r = await own.send('DELETE', '/api/admin/users/bob');
     const del = await r.json();
