@@ -152,6 +152,7 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     const sharePage = await r.text();
     check('short share URL opens a landing page without login', r.status === 200 && sharePage.includes('/share.js') && sharePage.includes('Mulai download'), r.status);
     r = await fetch(B + '/go/' + ownSlug + '/info');
+    check('short share metadata is not cacheable', r.headers.get('cache-control') === 'no-store', r.headers.get('cache-control'));
     d = await r.json();
     check('short share metadata exposes file details and expiry', r.status === 200 && d.status === 'active' && d.name === 'renamed.txt' && d.expiresAt > Date.now(), JSON.stringify(d));
     r = await fetch(B + '/go/' + ownSlug + '/download');
