@@ -616,15 +616,21 @@ admin.delete('/users/:id', wrap(async (req, res) => {
 api.use('/admin', admin);
 
 // share links: signed, expiring, read-only downloads tied to the account that made them.
-api.post('/share', requireScope('share'), json1, (req, res) => {
+api.post('/share', requireScope('share'), json1, wrap(async (req, res) => {
   const p = String((req.body || {}).path || '');
   const days = Math.min(Math.max(parseInt((req.body || {}).days || '7', 10) || 7, 1), 30);
-  if (!p) return res.status(400).json({ error: 'path required' });
-  if (!req.ctx.perms.share) return res.status(403).json({ error: 'Akun kamu tidak punya izin untuk membagikan link.' });
+  if (!p) throw httpError(400, 'path required');
+  if (!req.ctx.perms.share) throw httpError(403, 'Akun kamu tidak punya izin untuk membagikan link.');
   const account = req.ctx.id === OWNER_ID ? null : db.users[req.ctx.id];
   const token = makeToken({ k: 'share', p, u: req.ctx.id, tv: account ? account.tv : undefined, o: req.ctx.id === OWNER_ID ? 1 : 0, exp: Date.now() + days * 86400000 });
-  res.json({ url: `${req.protocol}://${req.get('host')}/s/${token}`, days });
-});
+  // The short code is only an alias. The signed token remains the authority for expiry/revocation.
+  db.shortLinks = db.shortLinks && typeof db.shortLinks === 'object' ? db.shortLinks : {};
+  let slug;
+  do { slug = b64u(crypto.randomBytes(6)); } while (db.shortLinks[slug]);
+  db.shortLinks[slug] = { token, createdAt: Date.now(), accountId: req.ctx.id };
+  await saveDb();
+  res.json({ url: `${req.protocol}://${req.get('host')}/go/${slug}`, days, short: true });
+}));
 app.use('/api', api);
 
 // Public share metadata. The signed token is the only access credential; no session or account
@@ -672,6 +678,46 @@ app.get('/s/:token/download', (req, res) => {
   const resolved = resolveCtx({ u: p.u, tv: p.tv, o: p.o, n: ADMIN_USER });
   if (!resolved.ctx || !resolved.ctx.perms.share) return res.status(410).send('Link ini sudah tidak tersedia.');
   proxy(req, res, resolved.ctx, '/download', { path: p.p });
+});
+
+// Short aliases resolve internally; never redirect recipients to the long signed token URL.
+function shortShareToken(req, res, next) {
+  const entry = db.shortLinks && db.shortLinks[String(req.params.slug || '')];
+  if (!entry || !entry.token) return res.status(404).json({ status: 'invalid', message: 'Link singkat tidak ditemukan.' });
+  req.shareToken = entry.token;
+  next();
+}
+app.get('/go/:slug/info', shortShareToken, (req, res) => {
+  req.params.token = req.shareToken;
+  // Reuse the same validation/metadata path as legacy signed links.
+  const p = readToken(req.shareToken, true);
+  if (!p || p.k !== 'share') return res.status(404).json({ status: 'invalid', message: 'Link tidak valid.' });
+  if (p.exp <= Date.now()) return res.status(410).json({ status: 'expired', expiresAt: p.exp, message: 'Masa berlaku link ini sudah berakhir.' });
+  const resolved = resolveCtx({ u: p.u, tv: p.tv, o: p.o, n: ADMIN_USER });
+  if (!resolved.ctx || !resolved.ctx.perms.share) return res.status(410).json({ status: 'unavailable', message: 'Link ini sudah tidak tersedia. Minta pemiliknya membuat link baru.' });
+  const relativePath = String(p.p || '');
+  const fileName = path.posix.basename(relativePath), parentPath = path.posix.dirname(relativePath);
+  if (!fileName || fileName === '.' || fileName === '..') return res.status(404).json({ status: 'invalid', message: 'Informasi file pada link ini tidak valid.' });
+  agentJson('GET', '/list?path=' + encodeURIComponent(parentPath === '.' ? '' : parentPath), resolved.ctx)
+    .then(({ status, json }) => {
+      if (status !== 200 || !json) return res.status(status === 401 ? 502 : 503).json({ status: 'unavailable', message: status === 401 ? MSG_TOKEN : MSG_OFFLINE });
+      const item = (Array.isArray(json.items) ? json.items : []).find((entry) => entry.name === fileName);
+      if (!item) return res.status(410).json({ status: 'unavailable', message: 'File atau folder sudah tidak tersedia.' });
+      const isFolder = item.type === 'dir';
+      res.json({ status: 'active', name: isFolder ? fileName + '.zip' : fileName, itemType: isFolder ? 'folder' : 'file', size: isFolder ? null : (Number.isFinite(item.size) ? item.size : null), expiresAt: p.exp });
+    }).catch(() => res.status(503).json({ status: 'unavailable', message: MSG_OFFLINE }));
+});
+app.get('/go/:slug/download', shortShareToken, (req, res) => {
+  const p = readToken(req.shareToken, true);
+  if (!p || p.k !== 'share') return res.status(404).send('Link tidak valid.');
+  if (p.exp <= Date.now()) return res.status(410).send('Masa berlaku link ini sudah berakhir.');
+  const resolved = resolveCtx({ u: p.u, tv: p.tv, o: p.o, n: ADMIN_USER });
+  if (!resolved.ctx || !resolved.ctx.perms.share) return res.status(410).send('Link ini sudah tidak tersedia.');
+  proxy(req, res, resolved.ctx, '/download', { path: p.p });
+});
+app.get('/go/:slug', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'public', 'share.html'));
 });
 
 // Share URLs show a page first; the recipient starts the transfer explicitly.
