@@ -330,7 +330,12 @@ function chunkedUpload(base, cookie, dir, name, buf) {
     check('carol (share permission) gets a link', r.status === 200 && /\/s\//.test(d.url), r.status);
     const carolTok = d.url.split('/').pop();
     r = await fetch(B + '/s/' + carolTok);
-    check('carol\'s link downloads HER file, no login needed', r.status === 200 && (await r.text()) === 'carol doc', r.status);
+    check('carol share link opens the public landing page', r.status === 200 && (await r.text()).includes('Mulai download'), r.status);
+    r = await fetch(B + '/s/' + carolTok + '/info');
+    d = await r.json();
+    check('carol share landing page exposes her file metadata', r.status === 200 && d.status === 'active' && d.name === 'doc.txt', JSON.stringify(d));
+    r = await fetch(B + '/s/' + carolTok + '/download');
+    check('carol share link downloads HER file without login', r.status === 200 && (await r.text()) === 'carol doc', r.status);
 
     // ============================================================ admins vs owner
     r = await mk(own, { username: 'dana', password: 'dana-pass-12', role: 'admin' });
