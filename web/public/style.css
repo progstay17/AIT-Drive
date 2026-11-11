@@ -669,7 +669,7 @@ select.input { appearance: auto; }
 }
 .app-shell { background:var(--bg); grid-template-columns:var(--sidebar-w) minmax(0,1fr); }
 .sidebar {
-  z-index:30; padding:25px 17px 18px; gap:25px; color:#fff;
+  padding:25px 17px 18px; gap:25px; color:#fff;
   background:linear-gradient(180deg,#2867c9 0%,#1f59b5 100%);
   border:0; box-shadow:8px 0 28px rgba(25,74,145,.10);
 }
