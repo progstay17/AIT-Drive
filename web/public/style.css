@@ -298,7 +298,7 @@ a { color: inherit; text-decoration: none; }
   .app-shell { display: block; }
   .sidebar { position: fixed; z-index: 60; inset: 0 auto 0 0; width: min(280px, 86vw); height: 100dvh; transform: translateX(-102%); transition: transform var(--t-base) var(--ease-out); box-shadow: var(--shadow-lg); }
   .sidebar.is-open { transform: translateX(0); }
-  .topbar { height: 62px; gap: 10px; padding-inline: 16px; }
+  .topbar { height: auto; flex-wrap: wrap; padding-block: 10px; gap: 10px; }
   .page { padding: 20px 16px 36px; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }
   .page-title { font-size: 22px; }
@@ -748,8 +748,9 @@ select.input { appearance: auto; }
 }
 @media (max-width:680px) {
   .topbar { gap:8px; padding-inline:12px; }
-  .topbar-actions { gap:4px; flex:none; }
-  .search-wrap { flex:1 1 auto; min-width:0; width:auto; }
+  .topbar-actions { gap:4px; flex:1 1 auto; order:1; justify-content:flex-end; }
+  .search-wrap { flex:1 1 100%; min-width:0; width:auto; order:3; }
+  .language-control { order:1; }
   #language-select { max-width:64px; min-height:34px; padding-inline:5px; font-size:11px; }
   #logout-btn .btn-label { display:none; }
   .page { padding:20px 14px 42px; }
