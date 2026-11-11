@@ -1029,7 +1029,11 @@
 
   // drag & drop (window-wide)
   let dragDepth = 0;
-  const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  const hasFiles = (e) => {
+    const types = e.dataTransfer && e.dataTransfer.types;
+    if (!types) return false;
+    try { return Array.from(types).includes('Files'); } catch { return false; }
+  };
   window.addEventListener('dragenter', (e) => { if (hasFiles(e) && !$('app-view').hidden) { dragDepth++; $('dropzone').hidden = false; } });
   window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $('dropzone').hidden = true; });
   window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
@@ -1059,16 +1063,36 @@
     dragDepth = 0; $('dropzone').hidden = true;
     if ($('app-view').hidden) return;
     const files = [];
-    for (const item of e.dataTransfer.items || []) {
+    const items = e.dataTransfer.items ? Array.from(e.dataTransfer.items) : [];
+    for (const item of items) {
       if (item.kind !== 'file') continue;
-      const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
-      if (entry) files.push(...await readDroppedEntry(entry));
-      else {
-        const file = item.getAsFile();
+      try {
+        const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+        if (entry) {
+          files.push(...await readDroppedEntry(entry));
+          continue;
+        }
+      } catch {}
+      try {
+        const file = item.getAsFile && item.getAsFile();
         if (file) files.push({ file, path: file.name });
+      } catch {}
+    }
+
+    // Some browsers expose dropped files through DataTransfer.files but return
+    // an empty/incomplete DataTransfer.items list. Fall back without duplicating
+    // files already collected above.
+    if (!files.length && e.dataTransfer.files && e.dataTransfer.files.length) {
+      for (const file of Array.from(e.dataTransfer.files)) {
+        files.push({ file, path: file.webkitRelativePath || file.name });
       }
     }
-    if (files.length) await uploadFiles(files);
+    if (files.length) {
+      info('Upload dimulai', files.length + ' file masuk antrean unggah.');
+      await uploadFiles(files);
+    } else {
+      warn('File tidak terbaca', 'Coba seret file lagi atau gunakan tombol Unggah.');
+    }
   });
 
   // ---------------------------------------------------------------- status + storage
